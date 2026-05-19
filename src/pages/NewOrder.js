@@ -11,7 +11,7 @@ const COLOURS = [
   'Gold', 'Silver', 'Lepord', 'Peach', 'Tube','ivory','Ocean blue', 'Multi-colour', 'Other'
 ];
 
-const SUPPLIERS = ['Joliko', 'L8', 'LEA MODE', 'New Collection', 'cherry-coco', 'Portebello', 'Venessa', 'mochhi','Fashion','Tendense','','Other'];
+const SUPPLIERS = ['Joliko', 'L8', 'LEA MODE', 'New Collection', 'cherry-coco', 'Portebello','Miss Lady', 'Venessa', 'mochhi','Fashion','Tendense','','Other'];
 
 const blankColourRow = () => ({ colour: '', quantity: 0 });
 const blankItem = () => ({
