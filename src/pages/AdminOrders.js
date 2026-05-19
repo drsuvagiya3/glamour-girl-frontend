@@ -22,15 +22,16 @@ export default function AdminOrders() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [ordersRes, catRes] = await Promise.all([
+      const [ordersRes, catRes] = await Promise.allSettled([
         API.get('/orders'),
         API.get('/supplier-categories')
       ]);
-      setOrders(ordersRes.data);
-      setShops([...new Set(ordersRes.data.map(o => o.franchiseName).filter(Boolean))]);
-      setCategories(catRes.data);
-      // expand all groups by default
-      const keys = [...new Set(ordersRes.data.map(o => o.adminCategory || o.supplierName || '__none__'))];
+      const ordersData = ordersRes.status === 'fulfilled' ? ordersRes.value.data : [];
+      const catsData = catRes.status === 'fulfilled' ? catRes.value.data : [];
+      setOrders(ordersData);
+      setShops([...new Set(ordersData.map(o => o.franchiseName).filter(Boolean))]);
+      setCategories(catsData);
+      const keys = [...new Set(ordersData.map(o => o.adminCategory || o.supplierName || '__none__'))];
       const exp = {};
       keys.forEach(k => exp[k] = true);
       setExpandedGroups(exp);
