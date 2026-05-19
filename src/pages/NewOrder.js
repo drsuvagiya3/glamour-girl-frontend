@@ -5,13 +5,13 @@ import { PlusCircle, Trash2, Image, Plus, X, Clock } from 'lucide-react';
 import API from '../utils/api';
 
 const COLOURS = [
-  'Black', 'White', 'Cream', 'Beige', 'Nude', 'Blush Pink', 'Hot Pink', 'Red',
-  'Burgundy', 'Navy', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
-  'Camel', 'Brown', 'Grey', 'Charcoal', 'Mocha', 'Baby Pink', 'Light Yellow',
-  'Gold', 'Silver', 'Multi-colour', 'Other'
+  'Black', 'White', 'Cream', 'Beige', 'Pink', 'Light Pink', 'Red',
+  'Wine', 'Denim','Navy blue', 'Royal Blue', 'Sky Blue', 'Mint', 'Green', 'Olive green','Orange','Khaki',
+  'Camel', 'Brown', 'Grey', 'Light grey','Dark Grey', 'Mocha', 'Yellow',
+  'Gold', 'Silver', 'Lepord', 'Peach', 'Tube','ivory','Ocean blue', 'Multi-colour', 'Other'
 ];
 
-const SUPPLIERS = ['Joliko', 'L8', 'LEA MODE', 'New Collection', 'cherry-coco', 'Portebello', 'Venessa', 'mochhi','Tendense','Other'];
+const SUPPLIERS = ['Joliko', 'L8', 'LEA MODE', 'New Collection', 'cherry-coco', 'Portebello', 'Venessa', 'mochhi','Fashion','Tendense','','Other'];
 
 const blankColourRow = () => ({ colour: '', quantity: 0 });
 const blankItem = () => ({
