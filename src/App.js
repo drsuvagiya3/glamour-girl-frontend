@@ -11,6 +11,8 @@ import NewOrder from './pages/NewOrder';
 import MyOrders from './pages/MyOrders';
 import AdminOrders from './pages/AdminOrders';
 import OrderBoard from './pages/OrderBoard';
+import SupplierCategories from './pages/SupplierCategories';
+import OrderSummary from './pages/OrderSummary';
 import Navbar from './components/Navbar';
 
 const PrivateRoute = ({ children, adminOnly = false }) => {
@@ -41,6 +43,8 @@ const AppRoutes = () => {
         <Route path="/board" element={<PrivateRoute><OrderBoard /></PrivateRoute>} />
         <Route path="/admin" element={<PrivateRoute adminOnly><AdminOrders /></PrivateRoute>} />
         <Route path="/dashboard" element={<PrivateRoute adminOnly><Dashboard /></PrivateRoute>} />
+        <Route path="/supplier-categories" element={<PrivateRoute adminOnly><SupplierCategories /></PrivateRoute>} />
+        <Route path="/order-summary" element={<PrivateRoute adminOnly><OrderSummary /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </div>
