@@ -30,17 +30,20 @@ export default function OrderSummary() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Get suppliers in selected category
-  const categorySuppliers = categoryFilter !== 'all'
-    ? categories.find(c => c._id === categoryFilter)?.suppliers || []
-    : [];
+  // Get category name from id
+  const selectedCatName = categoryFilter !== 'all'
+    ? categories.find(c => c._id === categoryFilter)?.name || ''
+    : '';
 
   // Apply filters
   const filtered = orders.filter(o => {
     if (shopFilter !== 'all' && o.franchiseName !== shopFilter) return false;
     if (supplierFilter !== 'all' && o.supplierName !== supplierFilter) return false;
     if (statusFilter !== 'all' && o.status !== statusFilter) return false;
-    if (categoryFilter !== 'all' && !categorySuppliers.includes(o.supplierName)) return false;
+    if (categoryFilter !== 'all') {
+      const orderCat = o.adminCategory || o.supplierName || '';
+      if (orderCat !== selectedCatName) return false;
+    }
     return true;
   });
 
@@ -190,7 +193,7 @@ export default function OrderSummary() {
             <label style={labelStyle}>Supplier</label>
             <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} style={selectStyle}>
               <option value="all">All Suppliers</option>
-              {(categoryFilter !== 'all' ? categorySuppliers : suppliers).map(s => <option key={s} value={s}>{s}</option>)}
+              {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           {/* Shop */}
