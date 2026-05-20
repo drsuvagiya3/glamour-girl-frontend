@@ -109,7 +109,21 @@ export default function MyOrders() {
       )}
 
       {selected && (
-        <OrderModal order={selected} onClose={() => setSelected(null)} isAdmin={false} />
+        <OrderModal
+          order={selected}
+          onClose={() => setSelected(null)}
+          isAdmin={false}
+          onFranchiseEdit={async (orderId, items, notes) => {
+            try {
+              const { data } = await API.put(`/orders/${orderId}/edit`, { items, notes });
+              setOrders(prev => prev.map(o => o._id === orderId ? data : o));
+              setSelected(data);
+              toast.success('Order updated!');
+            } catch (err) {
+              toast.error(err.response?.data?.message || 'Failed to update order');
+            }
+          }}
+        />
       )}
     </div>
   );
