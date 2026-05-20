@@ -10,26 +10,37 @@ export default function OrderSummary() {
   const [shopFilter, setShopFilter] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [shops, setShops] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [categories, setCategories] = useState([]);
 
   useEffect(() => {
     setLoading(true);
-    API.get('/orders')
-      .then(({ data }) => {
-        setOrders(data);
-        setShops([...new Set(data.map(o => o.franchiseName).filter(Boolean))]);
-        setSuppliers([...new Set(data.map(o => o.supplierName).filter(Boolean))]);
+    Promise.allSettled([API.get('/orders'), API.get('/supplier-categories')])
+      .then(([ordersRes, catRes]) => {
+        const ordersData = ordersRes.status === 'fulfilled' ? ordersRes.value.data : [];
+        const catsData = catRes.status === 'fulfilled' ? catRes.value.data : [];
+        setOrders(ordersData);
+        setShops([...new Set(ordersData.map(o => o.franchiseName).filter(Boolean))]);
+        setSuppliers([...new Set(ordersData.map(o => o.supplierName).filter(Boolean))]);
+        setCategories(catsData);
       })
-      .catch(() => toast.error('Failed to load orders'))
+      .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false));
   }, []);
+
+  // Get suppliers in selected category
+  const categorySuppliers = categoryFilter !== 'all'
+    ? categories.find(c => c._id === categoryFilter)?.suppliers || []
+    : [];
 
   // Apply filters
   const filtered = orders.filter(o => {
     if (shopFilter !== 'all' && o.franchiseName !== shopFilter) return false;
     if (supplierFilter !== 'all' && o.supplierName !== supplierFilter) return false;
     if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+    if (categoryFilter !== 'all' && !categorySuppliers.includes(o.supplierName)) return false;
     return true;
   });
 
@@ -64,174 +75,85 @@ export default function OrderSummary() {
   const summary = Object.values(summaryMap).sort((a, b) => b.totalQty - a.totalQty);
   const grandTotal = summary.reduce((a, s) => a + s.totalQty, 0);
 
-  // ── EXCEL DOWNLOAD ──
+  // ── EXCEL DOWNLOAD — Style No + Qty only ──
   const downloadExcel = () => {
     if (summary.length === 0) return toast.error('No data to download');
 
     const wb = XLSX.utils.book_new();
 
-    // ── Sheet 1: Summary by Style Number ──
-    const summaryRows = [
+    // Sheet 1: Summary — Style No + Total Qty only
+    const rows = [
       ['GLAMOUR GIRL — ORDER SUMMARY'],
-      [`Generated: ${new Date().toLocaleDateString('en-GB')}`],
-      [`Filters: Shop=${shopFilter}, Supplier=${supplierFilter}, Status=${statusFilter}`],
+      [`Date: ${new Date().toLocaleDateString('en-GB')}`],
+      [`Supplier: ${supplierFilter === 'all' ? 'All' : supplierFilter}   Shop: ${shopFilter === 'all' ? 'All' : shopFilter}   Status: ${statusFilter === 'all' ? 'All' : statusFilter}`],
       [],
-      ['Style No.', 'Description', 'Supplier(s)', 'Shops', 'Colours & Quantities', 'Total Qty'],
+      ['Style No.', 'Description', 'Total Qty'],
     ];
-
     summary.forEach(item => {
-      const coloursStr = Object.entries(item.colours)
-        .sort((a, b) => b[1] - a[1])
-        .map(([c, q]) => `${c}: ${q}`)
-        .join(' | ');
-      summaryRows.push([
-        item.styleNumber,
-        item.description,
-        [...item.suppliers].join(', '),
-        [...item.shops].join(', '),
-        coloursStr,
-        item.totalQty,
-      ]);
+      rows.push([item.styleNumber, item.description, item.totalQty]);
     });
+    rows.push([]);
+    rows.push(['', 'GRAND TOTAL', grandTotal]);
 
-    // Grand total row
-    summaryRows.push([]);
-    summaryRows.push(['', '', '', '', 'GRAND TOTAL', grandTotal]);
+    const ws1 = XLSX.utils.aoa_to_sheet(rows);
+    ws1['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
-    const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
-
-    // Column widths
-    ws1['!cols'] = [
-      { wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 30 }, { wch: 50 }, { wch: 12 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws1, 'Summary by Style');
-
-    // ── Sheet 2: Breakdown by Supplier ──
-    const supplierMap = {};
+    // Sheet 2: By Supplier — Style No + Qty per supplier
+    const supMap = {};
     filtered.forEach(order => {
       const sup = order.supplierName || 'Unknown';
-      if (!supplierMap[sup]) supplierMap[sup] = {};
+      if (!supMap[sup]) supMap[sup] = {};
       order.items.forEach(item => {
-        if (!supplierMap[sup][item.styleNumber]) {
-          supplierMap[sup][item.styleNumber] = {
-            description: item.description || '',
-            totalQty: 0,
-            colours: {},
-            shops: new Set(),
-          };
-        }
-        const qty = item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
-        supplierMap[sup][item.styleNumber].totalQty += qty;
-        item.colourSizes?.forEach(row => {
-          if (!row.colour) return;
-          if (!supplierMap[sup][item.styleNumber].colours[row.colour])
-            supplierMap[sup][item.styleNumber].colours[row.colour] = 0;
-          supplierMap[sup][item.styleNumber].colours[row.colour] += row.quantity || 0;
-        });
-        if (order.franchiseName) supplierMap[sup][item.styleNumber].shops.add(order.franchiseName);
+        if (!supMap[sup][item.styleNumber]) supMap[sup][item.styleNumber] = { description: item.description || '', qty: 0 };
+        supMap[sup][item.styleNumber].qty += item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
       });
     });
 
-    const supplierRows = [
-      ['GLAMOUR GIRL — ORDERS BY SUPPLIER'],
-      [`Generated: ${new Date().toLocaleDateString('en-GB')}`],
-      [],
-    ];
-
-    Object.entries(supplierMap).forEach(([supplier, styles]) => {
-      supplierRows.push([`SUPPLIER: ${supplier}`]);
-      supplierRows.push(['Style No.', 'Description', 'Shops', 'Colours & Quantities', 'Total Qty']);
-      let supplierTotal = 0;
-      Object.entries(styles)
-        .sort((a, b) => b[1].totalQty - a[1].totalQty)
-        .forEach(([styleNo, data]) => {
-          const coloursStr = Object.entries(data.colours)
-            .sort((a, b) => b[1] - a[1])
-            .map(([c, q]) => `${c}: ${q}`)
-            .join(' | ');
-          supplierRows.push([
-            styleNo,
-            data.description,
-            [...data.shops].join(', '),
-            coloursStr,
-            data.totalQty,
-          ]);
-          supplierTotal += data.totalQty;
-        });
-      supplierRows.push(['', '', '', `${supplier} TOTAL`, supplierTotal]);
-      supplierRows.push([]);
+    const supRows = [['GLAMOUR GIRL — BY SUPPLIER'], [`Date: ${new Date().toLocaleDateString('en-GB')}`], []];
+    Object.entries(supMap).forEach(([sup, styles]) => {
+      supRows.push([`SUPPLIER: ${sup}`]);
+      supRows.push(['Style No.', 'Description', 'Qty']);
+      let total = 0;
+      Object.entries(styles).sort((a, b) => b[1].qty - a[1].qty).forEach(([style, data]) => {
+        supRows.push([style, data.description, data.qty]);
+        total += data.qty;
+      });
+      supRows.push(['', 'TOTAL', total]);
+      supRows.push([]);
     });
-
-    const ws2 = XLSX.utils.aoa_to_sheet(supplierRows);
-    ws2['!cols'] = [
-      { wch: 14 }, { wch: 22 }, { wch: 30 }, { wch: 50 }, { wch: 12 }
-    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(supRows);
+    ws2['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'By Supplier');
 
-    // ── Sheet 3: Breakdown by Shop ──
+    // Sheet 3: By Shop — Style No + Qty per shop
     const shopMap = {};
     filtered.forEach(order => {
       const shop = order.franchiseName || 'Unknown';
       if (!shopMap[shop]) shopMap[shop] = {};
       order.items.forEach(item => {
-        if (!shopMap[shop][item.styleNumber]) {
-          shopMap[shop][item.styleNumber] = {
-            description: item.description || '',
-            supplierName: order.supplierName || '',
-            totalQty: 0,
-            colours: {},
-          };
-        }
-        const qty = item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
-        shopMap[shop][item.styleNumber].totalQty += qty;
-        item.colourSizes?.forEach(row => {
-          if (!row.colour) return;
-          if (!shopMap[shop][item.styleNumber].colours[row.colour])
-            shopMap[shop][item.styleNumber].colours[row.colour] = 0;
-          shopMap[shop][item.styleNumber].colours[row.colour] += row.quantity || 0;
-        });
+        if (!shopMap[shop][item.styleNumber]) shopMap[shop][item.styleNumber] = { description: item.description || '', qty: 0 };
+        shopMap[shop][item.styleNumber].qty += item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
       });
     });
 
-    const shopRows = [
-      ['GLAMOUR GIRL — ORDERS BY SHOP'],
-      [`Generated: ${new Date().toLocaleDateString('en-GB')}`],
-      [],
-    ];
-
+    const shopRows = [['GLAMOUR GIRL — BY SHOP'], [`Date: ${new Date().toLocaleDateString('en-GB')}`], []];
     Object.entries(shopMap).forEach(([shop, styles]) => {
       shopRows.push([`SHOP: ${shop}`]);
-      shopRows.push(['Style No.', 'Description', 'Supplier', 'Colours & Quantities', 'Total Qty']);
-      let shopTotal = 0;
-      Object.entries(styles)
-        .sort((a, b) => b[1].totalQty - a[1].totalQty)
-        .forEach(([styleNo, data]) => {
-          const coloursStr = Object.entries(data.colours)
-            .sort((a, b) => b[1] - a[1])
-            .map(([c, q]) => `${c}: ${q}`)
-            .join(' | ');
-          shopRows.push([
-            styleNo,
-            data.description,
-            data.supplierName,
-            coloursStr,
-            data.totalQty,
-          ]);
-          shopTotal += data.totalQty;
-        });
-      shopRows.push(['', '', '', `${shop} TOTAL`, shopTotal]);
+      shopRows.push(['Style No.', 'Description', 'Qty']);
+      let total = 0;
+      Object.entries(styles).sort((a, b) => b[1].qty - a[1].qty).forEach(([style, data]) => {
+        shopRows.push([style, data.description, data.qty]);
+        total += data.qty;
+      });
+      shopRows.push(['', 'TOTAL', total]);
       shopRows.push([]);
     });
-
     const ws3 = XLSX.utils.aoa_to_sheet(shopRows);
-    ws3['!cols'] = [
-      { wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 50 }, { wch: 12 }
-    ];
+    ws3['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws3, 'By Shop');
 
-    // Download
-    const fileName = `GlamourGirl_Orders_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.xlsx`;
+    const fileName = `GlamourGirl_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.xlsx`;
     XLSX.writeFile(wb, fileName);
     toast.success('Excel downloaded!');
   };
@@ -252,22 +174,35 @@ export default function OrderSummary() {
 
       {/* Filters */}
       <div style={{ background: 'var(--white)', borderRadius: 'var(--radius)', padding: '16px 20px', marginBottom: 16, boxShadow: 'var(--shadow)' }}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {/* Category */}
+          {categories.length > 0 && (
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <label style={labelStyle}>Category</label>
+              <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setSupplierFilter('all'); }} style={selectStyle}>
+                <option value="all">All Categories</option>
+                {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+          {/* Supplier */}
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={labelStyle}>Supplier</label>
+            <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} style={selectStyle}>
+              <option value="all">All Suppliers</option>
+              {(categoryFilter !== 'all' ? categorySuppliers : suppliers).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          {/* Shop */}
+          <div style={{ flex: 1, minWidth: 140 }}>
             <label style={labelStyle}>Shop</label>
             <select value={shopFilter} onChange={e => setShopFilter(e.target.value)} style={selectStyle}>
               <option value="all">All Shops</option>
               {shops.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <label style={labelStyle}>Supplier</label>
-            <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} style={selectStyle}>
-              <option value="all">All Suppliers</option>
-              {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1, minWidth: 160 }}>
+          {/* Status */}
+          <div style={{ flex: 1, minWidth: 140 }}>
             <label style={labelStyle}>Status</label>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle}>
               <option value="all">All Statuses</option>
@@ -278,15 +213,10 @@ export default function OrderSummary() {
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             <button className="btn btn-outline btn-sm"
-              onClick={() => { setShopFilter('all'); setSupplierFilter('all'); setStatusFilter('all'); }}>
+              onClick={() => { setShopFilter('all'); setSupplierFilter('all'); setStatusFilter('all'); setCategoryFilter('all'); }}>
               Clear
             </button>
           </div>
-        </div>
-
-        {/* Download hint */}
-        <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--blush)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--rose-dark)' }}>
-          💡 Use filters to narrow down, then click <strong>Download Excel</strong> to export. The file includes 3 sheets: Summary by Style, By Supplier, and By Shop.
         </div>
       </div>
 
@@ -297,7 +227,6 @@ export default function OrderSummary() {
         </div>
       ) : (
         <>
-          {/* Grand total banner */}
           <div style={{ background: 'var(--charcoal)', color: 'white', borderRadius: 'var(--radius)', padding: '16px 24px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ fontSize: '0.8rem', opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grand Total Units</div>
@@ -312,44 +241,33 @@ export default function OrderSummary() {
                 <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.5rem', fontWeight: 700 }}>{filtered.length}</div>
                 <div style={{ fontSize: '0.78rem', opacity: 0.6 }}>Orders</div>
               </div>
-              <button onClick={downloadExcel}
-                style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 10, padding: '10px 18px', color: 'white', fontFamily: 'DM Sans', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={downloadExcel} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 10, padding: '10px 18px', color: 'white', fontFamily: 'DM Sans', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Download size={14} /> Download Excel
               </button>
             </div>
           </div>
 
-          {/* Summary table */}
           <div style={{ background: 'var(--white)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 2fr 1fr 1fr', gap: 0, background: 'var(--blush)', padding: '12px 20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 2fr 1fr 1fr', background: 'var(--blush)', padding: '12px 20px' }}>
               <div style={thStyle}>Image</div>
               <div style={thStyle}>Style No.</div>
               <div style={thStyle}>Colours & Qty</div>
               <div style={thStyle}>Shops</div>
               <div style={{ ...thStyle, textAlign: 'right' }}>Total Qty</div>
             </div>
-
             {summary.map((item, idx) => (
-              <div key={item.styleNumber}
-                style={{ display: 'grid', gridTemplateColumns: '80px 1fr 2fr 1fr 1fr', gap: 0, padding: '16px 20px', alignItems: 'center', borderBottom: idx < summary.length - 1 ? '1px solid var(--light-gray)' : 'none', background: idx % 2 === 0 ? 'var(--white)' : 'var(--cream)' }}>
-
+              <div key={item.styleNumber} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 2fr 1fr 1fr', padding: '16px 20px', alignItems: 'center', borderBottom: idx < summary.length - 1 ? '1px solid var(--light-gray)' : 'none', background: idx % 2 === 0 ? 'var(--white)' : 'var(--cream)' }}>
                 <div>
                   {item.imageUrl
                     ? <img src={item.imageUrl} alt={item.styleNumber} style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', border: '2px solid var(--light-gray)' }} />
-                    : <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--blush)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Package size={20} color="var(--rose-dark)" />
-                      </div>
+                    : <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--blush)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={20} color="var(--rose-dark)" /></div>
                   }
                 </div>
-
                 <div>
                   <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.05rem', fontWeight: 700 }}>{item.styleNumber}</div>
                   {item.description && <div style={{ fontSize: '0.78rem', color: 'var(--gray)', marginTop: 2 }}>{item.description}</div>}
-                  {item.suppliers.size > 0 && (
-                    <div style={{ fontSize: '0.72rem', color: 'var(--info)', marginTop: 4 }}>📦 {[...item.suppliers].join(', ')}</div>
-                  )}
+                  {item.suppliers.size > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--info)', marginTop: 4 }}>📦 {[...item.suppliers].join(', ')}</div>}
                 </div>
-
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {Object.entries(item.colours).sort((a, b) => b[1] - a[1]).map(([colour, qty]) => (
                     <span key={colour} style={{ background: 'var(--blush)', color: 'var(--charcoal)', padding: '3px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -357,15 +275,11 @@ export default function OrderSummary() {
                     </span>
                   ))}
                 </div>
-
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {[...item.shops].map(shop => (
-                    <span key={shop} style={{ background: '#f0f0f0', padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', color: 'var(--gray)' }}>
-                      {shop}
-                    </span>
+                    <span key={shop} style={{ background: '#f0f0f0', padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', color: 'var(--gray)' }}>{shop}</span>
                   ))}
                 </div>
-
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.5rem', fontWeight: 700, color: 'var(--rose-dark)' }}>{item.totalQty}</span>
                   <div style={{ fontSize: '0.72rem', color: 'var(--gray)' }}>units</div>
