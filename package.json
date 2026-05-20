@@ -9,7 +9,7 @@
     "axios": "^1.6.2",
     "react-scripts": "5.0.1",
     "react-hot-toast": "^2.4.1",
-    "lucide-react": "^0.303.0"
+    "lucide-react": "^0.303.0",
     "xlsx": "^0.18.5"
   },
   "scripts": {
