@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { X, Package, MapPin, Plus, Trash2, Edit2, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Package, MapPin, Plus, Trash2, ArrowRight } from 'lucide-react';
+import API from '../utils/api';
+import toast from 'react-hot-toast';
 
 const COLOURS = [
   'Black', 'White', 'Cream', 'Beige', 'Nude', 'Blush Pink', 'Hot Pink', 'Red',
@@ -11,11 +13,51 @@ const COLOURS = [
 export default function OrderModal({ order, onClose, onStatusUpdate, onFranchiseEdit, isAdmin }) {
   if (!order) return null;
 
+  const [categories, setCategories] = useState([]);
+  const [movingItemIdx, setMovingItemIdx] = useState(null);
+  const [itemCategories, setItemCategories] = useState({});
+
+  useEffect(() => {
+    if (isAdmin) {
+      API.get('/supplier-categories').then(({ data }) => setCategories(data)).catch(() => {});
+      // Load existing item categories
+      const cats = {};
+      order.items.forEach((item, idx) => {
+        if (item.itemCategory) cats[idx] = item.itemCategory;
+      });
+      setItemCategories(cats);
+    }
+  }, [isAdmin, order]);
+
   const formatDate = (d) => new Date(d).toLocaleDateString('en-GB', {
     day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
 
   const canFranchiseEdit = !isAdmin && order.status === 'pending';
+
+  // Move individual item to a category
+  const moveItemToCategory = async (itemIdx, categoryName) => {
+    try {
+      const updatedItems = order.items.map((item, i) =>
+        i === itemIdx ? { ...item, itemCategory: categoryName } : item
+      );
+      await API.put(`/orders/${order._id}/status`, {
+        status: order.status,
+        items: updatedItems
+      });
+      setItemCategories(prev => ({ ...prev, [itemIdx]: categoryName }));
+      toast.success(`Item moved to ${categoryName || 'Uncategorised'}!`);
+      setMovingItemIdx(null);
+    } catch {
+      toast.error('Failed to move item');
+    }
+  };
+
+  // All category options
+  const allCategories = [
+    ...categories.map(c => c.name),
+    ...[...new Set(order.items.map(i => i.itemCategory).filter(Boolean))]
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -67,7 +109,6 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
             </div>
           )}
 
-          {/* Franchise edit notice */}
           {canFranchiseEdit && (
             <div style={{ background: '#f0f8f4', borderRadius: 10, padding: '12px 16px', marginBottom: 16, borderLeft: '3px solid var(--success)', fontSize: '0.85rem', color: 'var(--gray)' }}>
               ✏️ Your order is still <strong>pending</strong> — you can edit quantities before admin confirms it.
@@ -89,7 +130,15 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
                     </div>
                 }
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.05rem', fontWeight: 600 }}>Style: {item.styleNumber}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.05rem', fontWeight: 600 }}>Style: {item.styleNumber}</div>
+                    {/* Item category badge */}
+                    {(itemCategories[i] || item.itemCategory) && (
+                      <span style={{ background: 'var(--blush)', color: 'var(--rose-dark)', padding: '2px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 600 }}>
+                        📂 {itemCategories[i] || item.itemCategory}
+                      </span>
+                    )}
+                  </div>
                   {item.description && <div style={{ fontSize: '0.85rem', color: 'var(--gray)', marginTop: 2 }}>{item.description}</div>}
                   {(item.price > 0 || item.retailPrice > 0) && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -98,8 +147,60 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
                       {item.totalAmount > 0 && <span style={{ background: 'var(--rose-dark)', color: 'white', padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600 }}>Total: £{item.totalAmount}</span>}
                     </div>
                   )}
+                  {/* Move item button — admin only */}
+                  {isAdmin && (
+                    <button onClick={() => setMovingItemIdx(movingItemIdx === i ? null : i)}
+                      style={{ marginTop: 8, background: 'var(--blush)', border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--rose-dark)', fontWeight: 600, fontFamily: 'DM Sans', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      📂 Move to Category
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {/* Move item dropdown */}
+              {isAdmin && movingItemIdx === i && (
+                <div style={{ padding: '14px 16px', background: '#fafafa', borderTop: '1px solid var(--light-gray)' }}>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--gray)', marginBottom: 10, fontWeight: 500 }}>
+                    Move Style {item.styleNumber} to:
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {/* Uncategorised */}
+                    <button onClick={() => moveItemToCategory(i, '')}
+                      style={moveBtnStyle('var(--light-gray)', !itemCategories[i] && !item.itemCategory)}>
+                      <span>Uncategorised</span>
+                      {!itemCategories[i] && !item.itemCategory && <span style={{ fontSize: '0.72rem', fontWeight: 600, opacity: 0.7 }}>Current</span>}
+                    </button>
+                    {/* Existing categories */}
+                    {categories.map(cat => {
+                      const isCurrent = (itemCategories[i] || item.itemCategory) === cat.name;
+                      return (
+                        <button key={cat._id} onClick={() => !isCurrent && moveItemToCategory(i, cat.name)}
+                          style={moveBtnStyle(cat.colour, isCurrent)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: cat.colour }} />
+                            <span>{cat.name}</span>
+                          </div>
+                          {isCurrent
+                            ? <span style={{ fontSize: '0.72rem', fontWeight: 600, color: cat.colour }}>Current</span>
+                            : <ArrowRight size={13} color="var(--gray)" />}
+                        </button>
+                      );
+                    })}
+                    {/* Custom category */}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <input id={`custom-cat-${i}`} type="text" placeholder="Type custom category..."
+                        style={{ flex: 1, padding: '8px 12px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.85rem', outline: 'none' }} />
+                      <button className="btn btn-primary btn-sm"
+                        onClick={() => {
+                          const val = document.getElementById(`custom-cat-${i}`).value.trim();
+                          if (val) moveItemToCategory(i, val);
+                        }}>
+                        Move
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Colour/Size table */}
               {item.colourSizes && item.colourSizes.length > 0 && (
@@ -194,10 +295,7 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
   const updateColourQty = (itemIdx, rowIdx, value) => {
     setItems(prev => prev.map((item, i) => {
       if (i !== itemIdx) return item;
-      const newRows = item.colourSizes.map((row, j) =>
-        j === rowIdx ? { ...row, quantity: parseInt(value) || 0 } : row
-      );
-      return { ...item, colourSizes: newRows };
+      return { ...item, colourSizes: item.colourSizes.map((row, j) => j === rowIdx ? { ...row, quantity: parseInt(value) || 0 } : row) };
     }));
   };
 
@@ -225,32 +323,25 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
 
   return (
     <div>
-      <h4 style={{ marginBottom: 16, fontSize: '0.9rem', color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Update Order
-      </h4>
-
-      {/* Edit items quantities + pricing */}
+      <h4 style={{ marginBottom: 16, fontSize: '0.9rem', color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Update Order</h4>
       {items.map((item, idx) => {
         const totalQty = item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
         return (
           <div key={idx} style={{ background: 'var(--cream)', borderRadius: 10, padding: '14px', marginBottom: 12 }}>
             <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 10 }}>Style {item.styleNumber} — {totalQty} units</div>
-
-            {/* Colour qty edit */}
             <div style={{ marginBottom: 12 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ background: 'var(--blush)' }}>
-                    <th style={th}>Colour</th>
-                    <th style={th}>Qty</th>
-                    <th style={th}></th>
+                    <th style={th}>Colour</th><th style={th}>Qty</th><th style={th}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {item.colourSizes?.map((row, rowIdx) => (
                     <tr key={rowIdx} style={{ borderBottom: '1px solid var(--light-gray)' }}>
                       <td style={td}>
-                        <select value={row.colour} onChange={e => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, colourSizes: it.colourSizes.map((r, j) => j !== rowIdx ? r : { ...r, colour: e.target.value }) }))}
+                        <select value={row.colour}
+                          onChange={e => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, colourSizes: it.colourSizes.map((r, j) => j !== rowIdx ? r : { ...r, colour: e.target.value }) }))}
                           style={{ border: 'none', background: 'transparent', fontFamily: 'DM Sans', fontSize: '0.85rem', outline: 'none', width: '100%' }}>
                           <option value="">Select...</option>
                           {COLOURS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -271,13 +362,10 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
                   ))}
                 </tbody>
               </table>
-              <button type="button" onClick={() => addColourRow(idx)}
-                className="btn btn-outline btn-sm" style={{ marginTop: 8 }}>
+              <button type="button" onClick={() => addColourRow(idx)} className="btn btn-outline btn-sm" style={{ marginTop: 8 }}>
                 <Plus size={12} /> Add Colour
               </button>
             </div>
-
-            {/* Pricing */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
               <div>
                 <label style={smallLabel}>Wholesale (£)</label>
@@ -299,14 +387,10 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
           </div>
         );
       })}
-
-      {/* Grand total */}
       <div style={{ background: 'var(--charcoal)', color: 'white', borderRadius: 10, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <span style={{ fontSize: '0.9rem', opacity: 0.8 }}>Grand Total</span>
         <span style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.5rem', fontWeight: 700 }}>£{grandTotal.toFixed(2)}</span>
       </div>
-
-      {/* Status */}
       <div className="form-group">
         <label>Order Status</label>
         <select className="status-select" style={{ width: '100%' }} value={status} onChange={e => setStatus(e.target.value)}>
@@ -315,13 +399,11 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
           ))}
         </select>
       </div>
-
       <div className="form-group">
         <label>Admin Notes</label>
         <textarea rows={2} style={{ width: '100%', padding: '10px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.9rem', resize: 'vertical' }}
           placeholder="Notes for the franchise..." value={adminNotes} onChange={e => setAdminNotes(e.target.value)} />
       </div>
-
       <button className="btn btn-primary" onClick={handleUpdate} disabled={loading} style={{ width: '100%' }}>
         {loading ? 'Updating...' : `Update Order · Send £${grandTotal.toFixed(2)} to Franchise`}
       </button>
@@ -329,7 +411,7 @@ function AdminUpdateForm({ order, onUpdate, onClose }) {
   );
 }
 
-// ── Franchise Edit Form (only when pending) ──
+// ── Franchise Edit Form ──
 function FranchiseEditForm({ order, onSave, onClose }) {
   const [items, setItems] = useState(order.items.map(item => ({
     ...item,
@@ -354,17 +436,14 @@ function FranchiseEditForm({ order, onSave, onClose }) {
 
   return (
     <div>
-      <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        ✏️ Edit Your Order
-      </h4>
+      <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✏️ Edit Your Order</h4>
       {items.map((item, itemIdx) => (
         <div key={itemIdx} style={{ background: 'var(--cream)', borderRadius: 10, padding: '14px', marginBottom: 12 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Style {item.styleNumber}</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ background: 'var(--blush)' }}>
-                <th style={th}>Colour</th>
-                <th style={th}>Quantity</th>
+                <th style={th}>Colour</th><th style={th}>Quantity</th>
               </tr>
             </thead>
             <tbody>
@@ -388,13 +467,11 @@ function FranchiseEditForm({ order, onSave, onClose }) {
           </table>
         </div>
       ))}
-
       <div className="form-group">
         <label>Order Notes</label>
         <textarea rows={2} style={{ width: '100%', padding: '10px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.9rem', resize: 'vertical' }}
           value={notes} onChange={e => setNotes(e.target.value)} />
       </div>
-
       <button className="btn btn-rose" onClick={handleSave} disabled={loading} style={{ width: '100%' }}>
         {loading ? 'Saving...' : 'Save Changes'}
       </button>
@@ -406,3 +483,12 @@ const th = { padding: '9px 12px', textAlign: 'center', fontWeight: 600, fontSize
 const td = { padding: '7px 10px', textAlign: 'center' };
 const smallLabel = { display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 };
 const priceInput = { width: '100%', padding: '8px 10px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.9rem', outline: 'none', background: 'white' };
+const moveBtnStyle = (colour, isCurrent) => ({
+  padding: '9px 14px', borderRadius: 8,
+  border: `1.5px solid ${isCurrent ? colour : 'var(--light-gray)'}`,
+  background: isCurrent ? colour + '22' : 'var(--white)',
+  fontFamily: 'DM Sans', fontSize: '0.85rem',
+  cursor: isCurrent ? 'default' : 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  width: '100%', transition: 'all 0.2s'
+});
