@@ -154,73 +154,116 @@ export default function OrderSummary() {
   const summary = Object.values(summaryMap).sort((a, b) => b.totalQty - a.totalQty);
   const grandTotal = summary.reduce((a, s) => a + s.totalQty, 0);
 
-  // ── EXCEL DOWNLOAD — Full details ──
+  // ── EXCEL DOWNLOAD ──
   const downloadExcel = () => {
     if (summary.length === 0) return toast.error('No data to download');
     const wb = XLSX.utils.book_new();
+    const dateStr = new Date().toLocaleDateString('en-GB');
 
-    // ── Sheet 1: Full Summary — every style with all details ──
+    // ── Sheet 1: Summary by Style (one row per colour per shop) ──
     const s1Rows = [
-      ['GLAMOUR GIRL — FULL ORDER SUMMARY'],
-      [`Date: ${new Date().toLocaleDateString('en-GB')}`],
-      [`Filters — Supplier: ${supplierFilter === 'all' ? 'All' : supplierFilter} | Shop: ${shopFilter === 'all' ? 'All' : shopFilter} | Status: ${statusFilter === 'all' ? 'All' : statusFilter}`],
+      ['GLAMOUR GIRL — ORDER SUMMARY BY STYLE'],
+      ['Date: ' + dateStr],
+      ['Supplier: ' + (supplierFilter === 'all' ? 'All' : supplierFilter) + '  |  Shop: ' + (shopFilter === 'all' ? 'All' : shopFilter) + '  |  Status: ' + (statusFilter === 'all' ? 'All' : statusFilter)],
       [],
-      ['Style No.', 'Description', 'Supplier(s)', 'Colour', 'Quantity', 'Total Qty', 'Wholesale (£)', 'Retail (£)', 'Item Total (£)', 'Order No.', 'Shop', 'Location', 'Status'],
+      ['Style No.', 'Description', 'Supplier', 'Shop', 'Location', 'Colour', 'Qty', 'Total Style Qty', 'Wholesale (£)', 'Retail (£)'],
     ];
 
     summary.forEach(item => {
-      const colours = Object.entries(item.colours).sort((a, b) => b[1] - a[1]);
-      colours.forEach(([colour, qty], idx) => {
-        // Find an order that has this colour
-        const orderWithColour = item.orders.find(o =>
-          o.colourSizes?.some(r => r.colour === colour)
-        );
-        s1Rows.push([
-          idx === 0 ? item.styleNumber : '',
-          idx === 0 ? item.description : '',
-          idx === 0 ? [...item.suppliers].join(', ') : '',
-          colour,
-          qty,
-          idx === 0 ? item.totalQty : '',
-          idx === 0 && orderWithColour?.price ? `£${orderWithColour.price}` : '',
-          idx === 0 && orderWithColour?.retailPrice ? `£${orderWithColour.retailPrice}` : '',
-          idx === 0 && orderWithColour?.totalAmount ? `£${orderWithColour.totalAmount}` : '',
-          idx === 0 ? item.orders.map(o => o.orderNumber).join(', ') : '',
-          idx === 0 ? [...item.shops].join(', ') : '',
-          idx === 0 ? item.orders.map(o => o.franchiseLocation).filter(Boolean).join(', ') : '',
-          idx === 0 ? item.orders.map(o => o.status).join(', ') : '',
-        ]);
+      let firstRow = true;
+      item.orders.forEach(order => {
+        order.colourSizes?.forEach((row, rowIdx) => {
+          if (!row.colour || !row.quantity) return;
+          s1Rows.push([
+            firstRow && rowIdx === 0 ? item.styleNumber : '',
+            firstRow && rowIdx === 0 ? item.description : '',
+            firstRow && rowIdx === 0 ? [...item.suppliers].join(', ') : '',
+            rowIdx === 0 ? order.franchiseName : '',
+            rowIdx === 0 ? order.franchiseLocation : '',
+            row.colour,
+            row.quantity,
+            firstRow && rowIdx === 0 ? item.totalQty : '',
+            firstRow && rowIdx === 0 && order.price ? order.price : '',
+            firstRow && rowIdx === 0 && order.retailPrice ? order.retailPrice : '',
+          ]);
+          if (rowIdx === 0) firstRow = false;
+        });
       });
-      // Blank row between styles
       s1Rows.push([]);
     });
 
-    s1Rows.push(['', '', '', '', '', 'GRAND TOTAL', '', '', '', '', '', '', '']);
-    s1Rows[s1Rows.length - 1][5] = grandTotal;
-
+    s1Rows.push(['', '', '', '', '', '', '', 'GRAND TOTAL: ' + grandTotal, '', '']);
     const ws1 = XLSX.utils.aoa_to_sheet(s1Rows);
-    ws1['!cols'] = [
-      { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 10 },
-      { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 22 },
-      { wch: 20 }, { wch: 18 }, { wch: 12 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Full Summary');
+    ws1['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 8 }, { wch: 16 }, { wch: 14 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Summary by Style');
 
-    // ── Sheet 2: By Supplier ──
+    // ── Sheet 2: Style × Shop (grid — each shop is a column) ──
+    const s2Rows = [
+      ['GLAMOUR GIRL — STYLE × SHOP (COLOUR BREAKDOWN)'],
+      ['Date: ' + dateStr],
+      [],
+    ];
+
+    const allShops = [...new Set(filtered.map(o => o.franchiseName).filter(Boolean))].sort();
+
+    summary.forEach(item => {
+      // Build shopColourMap: shop -> colour -> qty
+      const shopColourMap = {};
+      item.orders.forEach(order => {
+        const shop = order.franchiseName || 'Unknown';
+        if (!shopColourMap[shop]) shopColourMap[shop] = {};
+        order.colourSizes?.forEach(row => {
+          if (!row.colour || !row.quantity) return;
+          if (!shopColourMap[shop][row.colour]) shopColourMap[shop][row.colour] = 0;
+          shopColourMap[shop][row.colour] += row.quantity;
+        });
+      });
+
+      const itemShops = Object.keys(shopColourMap).sort();
+      if (itemShops.length === 0) return;
+
+      // Style header
+      s2Rows.push(['Style: ' + item.styleNumber, item.description, 'Supplier: ' + [...item.suppliers].join(', '), 'Total: ' + item.totalQty + ' units']);
+      s2Rows.push(['Colour', ...itemShops, 'TOTAL']);
+
+      const allColours = Object.keys(item.colours).sort((a, b) => item.colours[b] - item.colours[a]);
+      allColours.forEach(colour => {
+        const row = [colour];
+        let rowTotal = 0;
+        itemShops.forEach(shop => {
+          const qty = shopColourMap[shop]?.[colour] || 0;
+          row.push(qty);
+          rowTotal += qty;
+        });
+        row.push(rowTotal);
+        s2Rows.push(row);
+      });
+
+      // Totals row
+      const totRow = ['TOTAL'];
+      let styleTotal = 0;
+      itemShops.forEach(shop => {
+        const t = Object.values(shopColourMap[shop] || {}).reduce((a, v) => a + v, 0);
+        totRow.push(t);
+        styleTotal += t;
+      });
+      totRow.push(styleTotal);
+      s2Rows.push(totRow);
+      s2Rows.push([]);
+    });
+
+    const ws2 = XLSX.utils.aoa_to_sheet(s2Rows);
+    ws2['!cols'] = [{ wch: 16 }, ...Array(allShops.length + 2).fill({ wch: 14 })];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Style x Shop');
+
+    // ── Sheet 3: By Supplier ──
     const supMap = {};
     filtered.forEach(order => {
       const sup = order.supplierName || 'Unknown';
       if (!supMap[sup]) supMap[sup] = {};
       order.items.forEach(item => {
         if (!supMap[sup][item.styleNumber]) {
-          supMap[sup][item.styleNumber] = {
-            description: item.description || '',
-            price: item.price || 0,
-            retailPrice: item.retailPrice || 0,
-            qty: 0,
-            colours: {},
-            shops: new Set(),
-          };
+          supMap[sup][item.styleNumber] = { description: item.description || '', qty: 0, colours: {}, shops: new Set() };
         }
         const qty = item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
         supMap[sup][item.styleNumber].qty += qty;
@@ -233,50 +276,34 @@ export default function OrderSummary() {
       });
     });
 
-    const s2Rows = [['GLAMOUR GIRL — BY SUPPLIER'], [`Date: ${new Date().toLocaleDateString('en-GB')}`], []];
+    const s3Rows = [['GLAMOUR GIRL — BY SUPPLIER'], ['Date: ' + dateStr], []];
     Object.entries(supMap).forEach(([sup, styles]) => {
-      s2Rows.push([`SUPPLIER: ${sup}`]);
-      s2Rows.push(['Style No.', 'Description', 'Colour', 'Qty', 'Total Qty', 'Wholesale (£)', 'Retail (£)', 'Shops']);
+      s3Rows.push(['SUPPLIER: ' + sup]);
+      s3Rows.push(['Style No.', 'Description', 'Colour', 'Qty', 'Total Qty', 'Shops']);
       let supTotal = 0;
       Object.entries(styles).sort((a, b) => b[1].qty - a[1].qty).forEach(([style, data]) => {
         const colours = Object.entries(data.colours).sort((a, b) => b[1] - a[1]);
         colours.forEach(([colour, qty], idx) => {
-          s2Rows.push([
-            idx === 0 ? style : '',
-            idx === 0 ? data.description : '',
-            colour, qty,
-            idx === 0 ? data.qty : '',
-            idx === 0 && data.price ? `£${data.price}` : '',
-            idx === 0 && data.retailPrice ? `£${data.retailPrice}` : '',
-            idx === 0 ? [...data.shops].join(', ') : '',
-          ]);
+          s3Rows.push([idx === 0 ? style : '', idx === 0 ? data.description : '', colour, qty, idx === 0 ? data.qty : '', idx === 0 ? [...data.shops].join(', ') : '']);
         });
         supTotal += data.qty;
-        s2Rows.push([]);
+        s3Rows.push([]);
       });
-      s2Rows.push(['', '', '', '', `${sup} TOTAL: ${supTotal}`, '', '', '']);
-      s2Rows.push([]);
+      s3Rows.push(['', '', '', '', 'TOTAL: ' + supTotal, '']);
+      s3Rows.push([]);
     });
-    const ws2 = XLSX.utils.aoa_to_sheet(s2Rows);
-    ws2['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 28 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'By Supplier');
+    const ws3 = XLSX.utils.aoa_to_sheet(s3Rows);
+    ws3['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 8 }, { wch: 12 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'By Supplier');
 
-    // ── Sheet 3: By Shop ──
+    // ── Sheet 4: By Shop ──
     const shopMap = {};
     filtered.forEach(order => {
       const shop = order.franchiseName || 'Unknown';
       if (!shopMap[shop]) shopMap[shop] = {};
       order.items.forEach(item => {
         if (!shopMap[shop][item.styleNumber]) {
-          shopMap[shop][item.styleNumber] = {
-            description: item.description || '',
-            supplierName: order.supplierName || '',
-            price: item.price || 0,
-            retailPrice: item.retailPrice || 0,
-            totalAmount: item.totalAmount || 0,
-            qty: 0,
-            colours: {},
-          };
+          shopMap[shop][item.styleNumber] = { description: item.description || '', supplierName: order.supplierName || '', qty: 0, colours: {} };
         }
         const qty = item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0;
         shopMap[shop][item.styleNumber].qty += qty;
@@ -288,100 +315,29 @@ export default function OrderSummary() {
       });
     });
 
-    const s3Rows = [['GLAMOUR GIRL — BY SHOP'], [`Date: ${new Date().toLocaleDateString('en-GB')}`], []];
+    const s4Rows = [['GLAMOUR GIRL — BY SHOP'], ['Date: ' + dateStr], []];
     Object.entries(shopMap).forEach(([shop, styles]) => {
-      s3Rows.push([`SHOP: ${shop}`]);
-      s3Rows.push(['Style No.', 'Description', 'Supplier', 'Colour', 'Qty', 'Total Qty', 'Wholesale (£)', 'Retail (£)', 'Item Total (£)']);
+      s4Rows.push(['SHOP: ' + shop]);
+      s4Rows.push(['Style No.', 'Description', 'Supplier', 'Colour', 'Qty', 'Total Qty']);
       let shopTotal = 0;
       Object.entries(styles).sort((a, b) => b[1].qty - a[1].qty).forEach(([style, data]) => {
         const colours = Object.entries(data.colours).sort((a, b) => b[1] - a[1]);
         colours.forEach(([colour, qty], idx) => {
-          s3Rows.push([
-            idx === 0 ? style : '',
-            idx === 0 ? data.description : '',
-            idx === 0 ? data.supplierName : '',
-            colour, qty,
-            idx === 0 ? data.qty : '',
-            idx === 0 && data.price ? `£${data.price}` : '',
-            idx === 0 && data.retailPrice ? `£${data.retailPrice}` : '',
-            idx === 0 && data.totalAmount ? `£${data.totalAmount}` : '',
-          ]);
+          s4Rows.push([idx === 0 ? style : '', idx === 0 ? data.description : '', idx === 0 ? data.supplierName : '', colour, qty, idx === 0 ? data.qty : '']);
         });
         shopTotal += data.qty;
-        s3Rows.push([]);
+        s4Rows.push([]);
       });
-      s3Rows.push(['', '', '', '', '', `${shop} TOTAL: ${shopTotal}`, '', '', '']);
-      s3Rows.push([]);
+      s4Rows.push(['', '', '', '', 'TOTAL: ' + shopTotal, '']);
+      s4Rows.push([]);
     });
-    const ws3 = XLSX.utils.aoa_to_sheet(s3Rows);
-    ws3['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'By Shop');
-
-    // ── Sheet 4: Style × Shop breakdown — each style shows qty per shop per colour ──
-    const s4Rows = [
-      ['GLAMOUR GIRL — STYLE × SHOP BREAKDOWN'],
-      [`Date: ${new Date().toLocaleDateString('en-GB')}`],
-      [],
-    ];
-
-    summary.forEach(item => {
-      // Build a map: shopName -> { colour -> qty }
-      const shopColourMap = {};
-      item.orders.forEach(order => {
-        const shop = order.franchiseName || 'Unknown';
-        if (!shopColourMap[shop]) shopColourMap[shop] = {};
-        order.colourSizes?.forEach(row => {
-          if (!row.colour) return;
-          if (!shopColourMap[shop][row.colour]) shopColourMap[shop][row.colour] = 0;
-          shopColourMap[shop][row.colour] += row.quantity || 0;
-        });
-      });
-
-      const shopNames = Object.keys(shopColourMap).sort();
-      if (shopNames.length === 0) return;
-
-      // Style header
-      s4Rows.push([`Style: ${item.styleNumber}`, item.description || '', `Supplier: ${[...item.suppliers].join(', ')}`, `Total: ${item.totalQty} units`]);
-
-      // Header row: Colour | Shop1 | Shop2 | ... | Total
-      s4Rows.push(['Colour', ...shopNames, 'TOTAL']);
-
-      // Get all colours for this style
-      const allColours = Object.keys(item.colours).sort((a, b) => item.colours[b] - item.colours[a]);
-
-      allColours.forEach(colour => {
-        const row = [colour];
-        let rowTotal = 0;
-        shopNames.forEach(shop => {
-          const qty = shopColourMap[shop][colour] || 0;
-          row.push(qty);
-          rowTotal += qty;
-        });
-        row.push(rowTotal);
-        s4Rows.push(row);
-      });
-
-      // Shop totals row
-      const totalsRow = ['TOTAL'];
-      let grandStyleTotal = 0;
-      shopNames.forEach(shop => {
-        const shopTotal = Object.values(shopColourMap[shop]).reduce((a, v) => a + v, 0);
-        totalsRow.push(shopTotal);
-        grandStyleTotal += shopTotal;
-      });
-      totalsRow.push(grandStyleTotal);
-      s4Rows.push(totalsRow);
-      s4Rows.push([]); // blank row between styles
-    });
-
     const ws4 = XLSX.utils.aoa_to_sheet(s4Rows);
-    // Dynamic column widths
-    ws4['!cols'] = [{ wch: 16 }, ...Array(20).fill({ wch: 14 })];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Style x Shop');
+    ws4['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 8 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'By Shop');
 
-    const fileName = `GlamourGirl_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.xlsx`;
+    const fileName = 'GlamourGirl_' + dateStr.replace(/\//g, '-') + '.xlsx';
     XLSX.writeFile(wb, fileName);
-    toast.success('Excel downloaded!');
+    toast.success('Excel downloaded — 4 sheets!');
   };
 
   if (loading) return <div className="loading"><div className="spinner" /></div>;
