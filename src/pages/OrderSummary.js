@@ -197,14 +197,15 @@ export default function OrderSummary() {
     ws1['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 8 }, { wch: 16 }, { wch: 14 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Summary by Style');
 
-    // ── Sheet 2: Style × Shop (grid — each shop is a column) ──
+    // ── Sheet 2: Style × Shop (grid — like the app screenshot, shops as columns) ──
+    const allShops = [...new Set(filtered.map(o => o.franchiseName).filter(Boolean))].sort();
+
     const s2Rows = [
-      ['GLAMOUR GIRL — STYLE × SHOP (COLOUR BREAKDOWN)'],
+      ['GLAMOUR GIRL — ORDER SHEET (STYLE × SHOP)'],
       ['Date: ' + dateStr],
+      ['Supplier: ' + (supplierFilter === 'all' ? 'All' : supplierFilter)],
       [],
     ];
-
-    const allShops = [...new Set(filtered.map(o => o.franchiseName).filter(Boolean))].sort();
 
     summary.forEach(item => {
       // Build shopColourMap: shop -> colour -> qty
@@ -222,38 +223,52 @@ export default function OrderSummary() {
       const itemShops = Object.keys(shopColourMap).sort();
       if (itemShops.length === 0) return;
 
-      // Style header
-      s2Rows.push(['Style: ' + item.styleNumber, item.description, 'Supplier: ' + [...item.suppliers].join(', '), 'Total: ' + item.totalQty + ' units']);
-      s2Rows.push(['Colour', ...itemShops, 'TOTAL']);
+      // ── Style header row (like "Serial Number: 2722  Price: 0.0") ──
+      s2Rows.push(['Serial Number: ' + item.styleNumber, '', 'Price:', item.orders[0]?.price || '0.0', '', 'Supplier: ' + [...item.suppliers].join(', ')]);
 
+      // ── Column headers: Colour | Quantity | Shop1 | Shop2 | ... | Ord Qty ──
+      s2Rows.push(['Colour', 'Total Qty', ...itemShops, 'Ord Qty.']);
+
+      // ── One row per colour ──
       const allColours = Object.keys(item.colours).sort((a, b) => item.colours[b] - item.colours[a]);
       allColours.forEach(colour => {
-        const row = [colour];
-        let rowTotal = 0;
-        itemShops.forEach(shop => {
-          const qty = shopColourMap[shop]?.[colour] || 0;
-          row.push(qty);
-          rowTotal += qty;
-        });
-        row.push(rowTotal);
-        s2Rows.push(row);
+        const totalForColour = item.colours[colour] || 0;
+        const shopQtys = itemShops.map(shop => shopColourMap[shop]?.[colour] || 0);
+        s2Rows.push([colour, totalForColour, ...shopQtys, totalForColour]);
       });
 
-      // Totals row
-      const totRow = ['TOTAL'];
-      let styleTotal = 0;
+      // ── Ord Qty totals row ──
+      const ordQtyRow = ['Ord Qty.', item.totalQty];
       itemShops.forEach(shop => {
-        const t = Object.values(shopColourMap[shop] || {}).reduce((a, v) => a + v, 0);
-        totRow.push(t);
-        styleTotal += t;
+        const shopTotal = Object.values(shopColourMap[shop] || {}).reduce((a, v) => a + v, 0);
+        ordQtyRow.push(shopTotal);
       });
-      totRow.push(styleTotal);
-      s2Rows.push(totRow);
-      s2Rows.push([]);
+      ordQtyRow.push(item.totalQty);
+      s2Rows.push(ordQtyRow);
+
+      // ── Ord Amt row (price * qty) ──
+      const price = item.orders[0]?.price || 0;
+      const ordAmtRow = ['Ord Amt.', price ? item.totalQty * price : ''];
+      itemShops.forEach(shop => {
+        const shopTotal = Object.values(shopColourMap[shop] || {}).reduce((a, v) => a + v, 0);
+        ordAmtRow.push(price ? shopTotal * price : '');
+      });
+      ordAmtRow.push(price ? item.totalQty * price : '');
+      s2Rows.push(ordAmtRow);
+
+      s2Rows.push([]); // blank row between styles
     });
 
+    // Grand totals at bottom
+    s2Rows.push(['Ord Qty.', grandTotal, ...allShops.map(shop => {
+      return filtered.reduce((total, order) => {
+        if (order.franchiseName !== shop) return total;
+        return total + order.items.reduce((t, item) => t + (item.colourSizes?.reduce((a, r) => a + (r.quantity || 0), 0) || 0), 0);
+      }, 0);
+    }), grandTotal]);
+
     const ws2 = XLSX.utils.aoa_to_sheet(s2Rows);
-    ws2['!cols'] = [{ wch: 16 }, ...Array(allShops.length + 2).fill({ wch: 14 })];
+    ws2['!cols'] = [{ wch: 18 }, { wch: 12 }, ...Array(allShops.length + 1).fill({ wch: 14 })];
     XLSX.utils.book_append_sheet(wb, ws2, 'Style x Shop');
 
     // ── Sheet 3: By Supplier ──
