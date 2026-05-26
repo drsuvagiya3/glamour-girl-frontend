@@ -1,10 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Download } from 'lucide-react';
+import { Package, Download, Edit2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import API from '../utils/api';
 
+// Edit style number modal
+function EditStyleModal({ styleNumber, onSave, onClose }) {
+  const [newStyle, setNewStyle] = React.useState(styleNumber);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Edit Style Number</h3>
+          <button className="close-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.85rem', color: 'var(--gray)', marginBottom: 14 }}>
+            Changing <strong>{styleNumber}</strong> to a style that already exists will <strong>merge</strong> the quantities together.
+          </p>
+          <div className="form-group">
+            <label>New Style Number</label>
+            <input type="text" value={newStyle} onChange={e => setNewStyle(e.target.value.trim())}
+              onKeyDown={e => e.key === 'Enter' && newStyle && onSave(newStyle)} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-primary" style={{ flex: 1 }}
+              onClick={() => newStyle && newStyle !== styleNumber && onSave(newStyle)}
+              disabled={!newStyle || newStyle === styleNumber}>
+              Save & Merge if needed
+            </button>
+            <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrderSummary() {
+  const [editingStyle, setEditingStyle] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [shopFilter, setShopFilter] = useState('all');
@@ -14,6 +48,39 @@ export default function OrderSummary() {
   const [shops, setShops] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [editingStyle, setEditingStyle] = useState(null);
+
+  // Save edited style number — merges if target already exists
+  const saveStyleNumber = async (oldStyle, newStyle) => {
+    try {
+      // Find all orders that have this style number
+      const affectedOrders = orders.filter(o =>
+        o.items.some(item => item.styleNumber === oldStyle)
+      );
+      // Update each order
+      for (const order of affectedOrders) {
+        const updatedItems = order.items.map(item => {
+          if (item.styleNumber !== oldStyle) return item;
+          return { ...item, styleNumber: newStyle };
+        });
+        await API.put(\`/orders/\${order._id}/status\`, {
+          status: order.status,
+          items: updatedItems
+        });
+      }
+      // Update local state
+      setOrders(prev => prev.map(order => ({
+        ...order,
+        items: order.items.map(item =>
+          item.styleNumber === oldStyle ? { ...item, styleNumber: newStyle } : item
+        )
+      })));
+      toast.success(\`Style \${oldStyle} renamed to \${newStyle}\${affectedOrders.length > 1 ? ' — merged across ' + affectedOrders.length + ' orders' : ''}!\`);
+      setEditingStyle(null);
+    } catch {
+      toast.error('Failed to update style number');
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -358,7 +425,14 @@ export default function OrderSummary() {
                   }
                 </div>
                 <div>
-                  <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.05rem', fontWeight: 700 }}>{item.styleNumber}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.05rem', fontWeight: 700 }}>{item.styleNumber}</div>
+                    <button onClick={() => setEditingStyle(item.styleNumber)}
+                      title="Edit style number"
+                      style={{ background: 'var(--light-gray)', border: 'none', borderRadius: 6, padding: '3px 7px', cursor: 'pointer', color: 'var(--gray)', display: 'flex', alignItems: 'center' }}>
+                      <Edit2 size={11} />
+                    </button>
+                  </div>
                   {item.description && <div style={{ fontSize: '0.78rem', color: 'var(--gray)', marginTop: 2 }}>{item.description}</div>}
                   {item.suppliers.size > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--info)', marginTop: 4 }}>📦 {[...item.suppliers].join(', ')}</div>}
                 </div>
@@ -382,6 +456,13 @@ export default function OrderSummary() {
             ))}
           </div>
         </>
+      )}
+    {editingStyle && (
+        <EditStyleModal
+          styleNumber={editingStyle}
+          onSave={(newStyle) => saveStyleNumber(editingStyle, newStyle)}
+          onClose={() => setEditingStyle(null)}
+        />
       )}
     </div>
   );
