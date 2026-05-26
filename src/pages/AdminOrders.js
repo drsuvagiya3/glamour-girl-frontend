@@ -17,7 +17,8 @@ export default function AdminOrders() {
   const [viewMode, setViewMode] = useState('grouped');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [categories, setCategories] = useState([]);
-  const [movingOrder, setMovingOrder] = useState(null); // order being reassigned
+  const [movingOrder, setMovingOrder] = useState(null);
+  const [movingItem, setMovingItem] = useState(null); // {order, itemIdx}
 
   const fetchAll = async () => {
     setLoading(true);
@@ -44,20 +45,36 @@ export default function AdminOrders() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  // Assign order to a category (saves adminCategory on the order)
+  // Move whole order to category
   const assignCategory = async (orderId, categoryName) => {
     try {
-      await API.put(`/orders/${orderId}/status`, {
+      const { data } = await API.put(`/orders/${orderId}/status`, {
         adminCategory: categoryName,
         status: orders.find(o => o._id === orderId)?.status
       });
-      setOrders(prev => prev.map(o =>
-        o._id === orderId ? { ...o, adminCategory: categoryName } : o
-      ));
+      setOrders(prev => prev.map(o => o._id === orderId ? { ...o, adminCategory: categoryName } : o));
       toast.success(`Order moved to ${categoryName || 'Uncategorised'}!`);
       setMovingOrder(null);
     } catch {
       toast.error('Failed to move order');
+    }
+  };
+
+  // Move individual item to category
+  const assignItemCategory = async (order, itemIdx, categoryName) => {
+    try {
+      const updatedItems = order.items.map((item, i) =>
+        i === itemIdx ? { ...item, itemCategory: categoryName } : item
+      );
+      const { data } = await API.put(`/orders/${order._id}/status`, {
+        status: order.status,
+        items: updatedItems
+      });
+      setOrders(prev => prev.map(o => o._id === order._id ? { ...o, items: updatedItems } : o));
+      toast.success(`Item moved to ${categoryName || 'Uncategorised'}!`);
+      setMovingItem(null);
+    } catch {
+      toast.error('Failed to move item');
     }
   };
 
@@ -75,7 +92,7 @@ export default function AdminOrders() {
     return true;
   });
 
-  // Group by adminCategory, fallback to supplierName, fallback to 'Uncategorised'
+  // Group by adminCategory / supplierName
   const grouped = {};
   filtered.forEach(order => {
     const key = order.adminCategory || order.supplierName || '__none__';
@@ -89,14 +106,12 @@ export default function AdminOrders() {
     return a.localeCompare(b);
   });
 
-  // All possible category names for the move modal
   const allCategoryNames = [
     ...categories.map(c => c.name),
-    ...[ ...new Set(orders.map(o => o.supplierName).filter(Boolean)) ]
+    ...[...new Set(orders.map(o => o.supplierName).filter(Boolean))]
   ].filter((v, i, a) => a.indexOf(v) === i);
 
-  const toggleGroup = (key) =>
-    setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleGroup = (key) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
 
   const handleStatusUpdate = async (orderId, status, adminNotes, items, grandTotal) => {
     try {
@@ -126,6 +141,105 @@ export default function AdminOrders() {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
 
+  // Move Order Modal
+  const MoveOrderModal = ({ order, onClose }) => {
+    const [customCat, setCustomCat] = useState('');
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <h3>Move Order {order.orderNumber}</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--gray)', marginTop: 4 }}>
+                Move entire order to a category
+              </p>
+            </div>
+            <button className="close-btn" onClick={onClose}><X size={16} /></button>
+          </div>
+          <div className="modal-body">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => assignCategory(order._id, '')} style={moveBtnStyle('var(--light-gray)', !order.adminCategory)}>
+                <span>Uncategorised</span>
+                {!order.adminCategory && <span style={{ fontSize: '0.72rem', color: 'var(--gray)' }}>Current</span>}
+              </button>
+              {allCategoryNames.map(name => {
+                const isCurrent = order.adminCategory === name;
+                const cat = categories.find(c => c.name === name);
+                return (
+                  <button key={name} onClick={() => !isCurrent && assignCategory(order._id, name)}
+                    style={moveBtnStyle(cat?.colour || 'var(--rose-dark)', isCurrent)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: cat?.colour || 'var(--rose-dark)' }} />
+                      <span>{name}</span>
+                    </div>
+                    {isCurrent ? <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Current</span> : <ChevronRight size={14} />}
+                  </button>
+                );
+              })}
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <input value={customCat} onChange={e => setCustomCat(e.target.value)}
+                  placeholder="Type custom category..."
+                  style={{ flex: 1, padding: '8px 12px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.85rem', outline: 'none' }} />
+                <button className="btn btn-primary btn-sm" onClick={() => customCat.trim() && assignCategory(order._id, customCat.trim())}>Move</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Move Item Modal
+  const MoveItemModal = ({ order, itemIdx, onClose }) => {
+    const item = order.items[itemIdx];
+    const [customCat, setCustomCat] = useState('');
+    const currentCat = item.itemCategory || '';
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <h3>Move Item: Style {item.styleNumber}</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--gray)', marginTop: 4 }}>
+                From order {order.orderNumber} · Move this item only
+              </p>
+            </div>
+            <button className="close-btn" onClick={onClose}><X size={16} /></button>
+          </div>
+          <div className="modal-body">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => assignItemCategory(order, itemIdx, '')}
+                style={moveBtnStyle('var(--light-gray)', !currentCat)}>
+                <span>Uncategorised</span>
+                {!currentCat && <span style={{ fontSize: '0.72rem', color: 'var(--gray)' }}>Current</span>}
+              </button>
+              {allCategoryNames.map(name => {
+                const isCurrent = currentCat === name;
+                const cat = categories.find(c => c.name === name);
+                return (
+                  <button key={name} onClick={() => !isCurrent && assignItemCategory(order, itemIdx, name)}
+                    style={moveBtnStyle(cat?.colour || 'var(--rose-dark)', isCurrent)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: cat?.colour || 'var(--rose-dark)' }} />
+                      <span>{name}</span>
+                    </div>
+                    {isCurrent ? <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Current</span> : <ChevronRight size={14} />}
+                  </button>
+                );
+              })}
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <input value={customCat} onChange={e => setCustomCat(e.target.value)}
+                  placeholder="Type custom category..."
+                  style={{ flex: 1, padding: '8px 12px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.85rem', outline: 'none' }} />
+                <button className="btn btn-primary btn-sm" onClick={() => customCat.trim() && assignItemCategory(order, itemIdx, customCat.trim())}>Move</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -134,14 +248,8 @@ export default function AdminOrders() {
           <p>{filtered.length} of {orders.length} orders</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setViewMode('grouped')}
-            className={`btn btn-sm ${viewMode === 'grouped' ? 'btn-primary' : 'btn-outline'}`}>
-            📦 By Category
-          </button>
-          <button onClick={() => setViewMode('list')}
-            className={`btn btn-sm ${viewMode === 'list' ? 'btn-primary' : 'btn-outline'}`}>
-            📋 List
-          </button>
+          <button onClick={() => setViewMode('grouped')} className={`btn btn-sm ${viewMode === 'grouped' ? 'btn-primary' : 'btn-outline'}`}>📦 By Category</button>
+          <button onClick={() => setViewMode('list')} className={`btn btn-sm ${viewMode === 'list' ? 'btn-primary' : 'btn-outline'}`}>📋 List</button>
         </div>
       </div>
 
@@ -152,9 +260,7 @@ export default function AdminOrders() {
           {isFiltered && <button onClick={clearFilters} style={clearBtn}>✕ Clear all</button>}
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className={`filter-btn ${shopFilter === 'all' ? 'active' : ''}`} onClick={() => setShopFilter('all')}>
-            All Shops ({orders.length})
-          </button>
+          <button className={`filter-btn ${shopFilter === 'all' ? 'active' : ''}`} onClick={() => setShopFilter('all')}>All Shops ({orders.length})</button>
           {shops.map(shop => (
             <button key={shop} className={`filter-btn ${shopFilter === shop ? 'active' : ''}`}
               onClick={() => setShopFilter(shop)}
@@ -169,14 +275,9 @@ export default function AdminOrders() {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', flex: 1 }}>
           {STATUS_FILTERS.map(f => (
-            <button key={f} className={`filter-btn ${statusFilter === f ? 'active' : ''}`}
-              onClick={() => setStatusFilter(f)}>
+            <button key={f} className={`filter-btn ${statusFilter === f ? 'active' : ''}`} onClick={() => setStatusFilter(f)}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
-              {f !== 'all' && (
-                <span style={{ marginLeft: 5, background: 'rgba(255,255,255,0.25)', borderRadius: 10, padding: '1px 6px', fontSize: '0.7rem' }}>
-                  {orders.filter(o => o.status === f).length}
-                </span>
-              )}
+              {f !== 'all' && <span style={{ marginLeft: 5, background: 'rgba(255,255,255,0.25)', borderRadius: 10, padding: '1px 6px', fontSize: '0.7rem' }}>{orders.filter(o => o.status === f).length}</span>}
             </button>
           ))}
         </div>
@@ -184,74 +285,9 @@ export default function AdminOrders() {
           value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 220 }} />
       </div>
 
-      {/* Move order to category modal */}
-      {movingOrder && (
-        <div className="modal-overlay" onClick={() => setMovingOrder(null)}>
-          <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h3>Move Order {movingOrder.orderNumber}</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--gray)', marginTop: 4 }}>
-                  Select which category to move this order to
-                </p>
-              </div>
-              <button className="close-btn" onClick={() => setMovingOrder(null)}><X size={16} /></button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {/* Uncategorised */}
-                <button onClick={() => assignCategory(movingOrder._id, '')}
-                  style={moveBtnStyle('var(--light-gray)', !movingOrder.adminCategory)}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--light-gray)' }} />
-                    <span>Uncategorised</span>
-                  </div>
-                  {!movingOrder.adminCategory && <span style={{ fontSize: '0.75rem', color: 'var(--gray)', fontWeight: 600 }}>Current</span>}
-                </button>
-
-                {/* Supplier names as categories */}
-                {allCategoryNames.map(name => {
-                  const isCurrent = movingOrder.adminCategory === name;
-                  const cat = categories.find(c => c.name === name);
-                  const colour = cat?.colour || 'var(--rose-dark)';
-                  return (
-                    <button key={name} onClick={() => !isCurrent && assignCategory(movingOrder._id, name)}
-                      style={moveBtnStyle(colour, isCurrent)}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 14, height: 14, borderRadius: '50%', background: colour }} />
-                        <span style={{ fontWeight: 500 }}>{name}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--gray)' }}>
-                          ({filtered.filter(o => (o.adminCategory || o.supplierName) === name).length} orders)
-                        </span>
-                      </div>
-                      {isCurrent
-                        ? <span style={{ fontSize: '0.75rem', color: colour, fontWeight: 600 }}>Current</span>
-                        : <ChevronRight size={14} color="var(--gray)" />
-                      }
-                    </button>
-                  );
-                })}
-
-                {/* Custom category input */}
-                <div style={{ marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--light-gray)' }}>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--gray)', marginBottom: 8 }}>Or type a new category name:</p>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input id="custom-cat" type="text" placeholder="e.g. Premium, Local..."
-                      style={{ flex: 1, padding: '10px 14px', border: '1.5px solid var(--light-gray)', borderRadius: 8, fontFamily: 'DM Sans', fontSize: '0.88rem', outline: 'none' }} />
-                    <button className="btn btn-primary btn-sm"
-                      onClick={() => {
-                        const val = document.getElementById('custom-cat').value.trim();
-                        if (val) assignCategory(movingOrder._id, val);
-                      }}>
-                      Move
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Move modals */}
+      {movingOrder && <MoveOrderModal order={movingOrder} onClose={() => setMovingOrder(null)} />}
+      {movingItem && <MoveItemModal order={movingItem.order} itemIdx={movingItem.itemIdx} onClose={() => setMovingItem(null)} />}
 
       {loading ? (
         <div className="loading"><div className="spinner" /></div>
@@ -273,15 +309,12 @@ export default function AdminOrders() {
 
             return (
               <div key={groupKey} style={{ background: 'var(--white)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow)', overflow: 'hidden', borderLeft: `4px solid ${colour}` }}>
-                {/* Group header */}
                 <div onClick={() => toggleGroup(groupKey)}
                   style={{ padding: '16px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: isExpanded ? 'var(--charcoal)' : 'var(--white)', transition: 'background 0.2s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <FolderOpen size={20} color={isExpanded ? 'white' : colour} />
                     <div>
-                      <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.2rem', fontWeight: 700, color: isExpanded ? 'var(--white)' : 'var(--charcoal)' }}>
-                        {displayName}
-                      </div>
+                      <div style={{ fontFamily: 'Cormorant Garamond', fontSize: '1.2rem', fontWeight: 700, color: isExpanded ? 'var(--white)' : 'var(--charcoal)' }}>{displayName}</div>
                       <div style={{ fontSize: '0.8rem', color: isExpanded ? 'rgba(255,255,255,0.6)' : 'var(--gray)', marginTop: 2 }}>
                         {groupOrders.length} order{groupOrders.length !== 1 ? 's' : ''}
                         {totalAmount > 0 && ` · Total: £${totalAmount.toFixed(2)}`}
@@ -298,72 +331,64 @@ export default function AdminOrders() {
                   </div>
                 </div>
 
-                {/* Orders in this group */}
                 {isExpanded && (
                   <div>
                     {groupOrders.map((order, idx) => (
-                      <div key={order._id}
-                        style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: idx < groupOrders.length - 1 ? '1px solid var(--light-gray)' : 'none', cursor: 'pointer', transition: 'background 0.15s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'var(--cream)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <div key={order._id} style={{ borderBottom: idx < groupOrders.length - 1 ? '1px solid var(--light-gray)' : 'none' }}>
+                        {/* Order row */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', cursor: 'pointer', transition: 'background 0.15s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--cream)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
-                        {/* Thumbnails */}
-                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={() => setSelected(order)}>
-                          {order.items.slice(0, 2).map((item, i) => (
-                            item.imageUrl
-                              ? <img key={i} src={item.imageUrl} alt="" className="item-thumb" />
-                              : <div key={i} className="item-thumb-placeholder" style={{ fontSize: '0.6rem' }}>{item.styleNumber}</div>
-                          ))}
-                        </div>
-
-                        <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelected(order)}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontFamily: 'Cormorant Garamond', fontSize: '1rem', fontWeight: 700 }}>{order.orderNumber}</span>
-                            <span className={`status-badge status-${order.status}`}>{order.status}</span>
-                            {order.grandTotal > 0 && (
-                              <span style={{ background: 'var(--charcoal)', color: 'white', padding: '3px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700 }}>
-                                £{order.grandTotal.toFixed(2)}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.82rem', fontWeight: 600 }}>
-                              <Package size={12} /> {order.franchiseName}
-                            </span>
-                            {order.supplierName && (
-                              <span style={{ fontSize: '0.78rem', color: 'var(--info)' }}>📦 {order.supplierName}</span>
-                            )}
-                            {order.franchiseLocation && (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', color: 'var(--gray)' }}>
-                                <MapPin size={11} /> {order.franchiseLocation}
-                              </span>
-                            )}
-                            <span style={{ fontSize: '0.78rem', color: 'var(--gray)' }}>
-                              {order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                            {order.items.map((item, i) => (
-                              <span key={i} style={{ background: 'var(--blush)', color: 'var(--rose-dark)', padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', fontWeight: 600 }}>
-                                {item.styleNumber}
-                              </span>
+                          <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={() => setSelected(order)}>
+                            {order.items.slice(0, 2).map((item, i) => (
+                              item.imageUrl
+                                ? <img key={i} src={item.imageUrl} alt="" className="item-thumb" />
+                                : <div key={i} className="item-thumb-placeholder" style={{ fontSize: '0.6rem' }}>{item.styleNumber}</div>
                             ))}
                           </div>
-                        </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                          {/* Move to category button */}
-                          <button
-                            onClick={e => { e.stopPropagation(); setMovingOrder(order); }}
-                            title="Move to category"
-                            style={{ background: 'var(--blush)', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--rose-dark)', fontWeight: 600, fontFamily: 'DM Sans', whiteSpace: 'nowrap' }}>
-                            📂 Move
-                          </button>
-                          <button className="close-btn" onClick={(e) => handleDelete(order._id, e)}
-                            style={{ background: '#fde8e8', color: 'var(--danger)' }}>
-                            <Trash2 size={13} />
-                          </button>
-                          <ChevronRight size={16} color="var(--gray)" onClick={() => setSelected(order)} />
+                          <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelected(order)}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontFamily: 'Cormorant Garamond', fontSize: '1rem', fontWeight: 700 }}>{order.orderNumber}</span>
+                              <span className={`status-badge status-${order.status}`}>{order.status}</span>
+                              {order.grandTotal > 0 && <span style={{ background: 'var(--charcoal)', color: 'white', padding: '3px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700 }}>£{order.grandTotal.toFixed(2)}</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.82rem', fontWeight: 600 }}><Package size={12} /> {order.franchiseName}</span>
+                              {order.supplierName && <span style={{ fontSize: '0.78rem', color: 'var(--info)' }}>📦 {order.supplierName}</span>}
+                              {order.franchiseLocation && <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', color: 'var(--gray)' }}><MapPin size={11} /> {order.franchiseLocation}</span>}
+                              <span style={{ fontSize: '0.78rem', color: 'var(--gray)' }}>{order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}</span>
+                            </div>
+                            {/* Style numbers with individual move buttons */}
+                            <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                              {order.items.map((item, itemIdx) => (
+                                <div key={itemIdx} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  <span style={{ background: item.itemCategory ? 'var(--charcoal)' : 'var(--blush)', color: item.itemCategory ? 'white' : 'var(--rose-dark)', padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', fontWeight: 600 }}>
+                                    {item.styleNumber}
+                                    {item.itemCategory && <span style={{ opacity: 0.7, marginLeft: 4 }}>→{item.itemCategory}</span>}
+                                  </span>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); setMovingItem({ order, itemIdx }); }}
+                                    title={`Move style ${item.styleNumber} to category`}
+                                    style={{ background: 'var(--light-gray)', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontSize: '0.65rem', color: 'var(--gray)' }}>
+                                    📂
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                            <button onClick={e => { e.stopPropagation(); setMovingOrder(order); }}
+                              style={{ background: 'var(--blush)', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--rose-dark)', fontWeight: 600, fontFamily: 'DM Sans' }}>
+                              📂 Move
+                            </button>
+                            <button className="close-btn" onClick={(e) => handleDelete(order._id, e)} style={{ background: '#fde8e8', color: 'var(--danger)' }}>
+                              <Trash2 size={13} />
+                            </button>
+                            <ChevronRight size={16} color="var(--gray)" onClick={() => setSelected(order)} />
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -377,12 +402,10 @@ export default function AdminOrders() {
         // LIST VIEW
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {filtered.map(order => (
-            <div key={order._id} className="order-card"
-              style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
+            <div key={order._id} className="order-card" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
               <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={() => setSelected(order)}>
                 {order.items.slice(0, 2).map((item, i) => (
-                  item.imageUrl
-                    ? <img key={i} src={item.imageUrl} alt="" className="item-thumb" />
+                  item.imageUrl ? <img key={i} src={item.imageUrl} alt="" className="item-thumb" />
                     : <div key={i} className="item-thumb-placeholder" style={{ fontSize: '0.6rem' }}>{item.styleNumber}</div>
                 ))}
               </div>
@@ -390,25 +413,13 @@ export default function AdminOrders() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span className="order-number" style={{ fontSize: '1rem' }}>{order.orderNumber}</span>
                   <span className={`status-badge status-${order.status}`}>{order.status}</span>
-                  {order.adminCategory && (
-                    <span style={{ background: 'var(--blush)', color: 'var(--rose-dark)', padding: '3px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 600 }}>
-                      📂 {order.adminCategory}
-                    </span>
-                  )}
-                  {order.grandTotal > 0 && (
-                    <span style={{ background: 'var(--charcoal)', color: 'white', padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700 }}>
-                      £{order.grandTotal.toFixed(2)}
-                    </span>
-                  )}
+                  {order.adminCategory && <span style={{ background: 'var(--blush)', color: 'var(--rose-dark)', padding: '3px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 600 }}>📂 {order.adminCategory}</span>}
+                  {order.grandTotal > 0 && <span style={{ background: 'var(--charcoal)', color: 'white', padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700 }}>£{order.grandTotal.toFixed(2)}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 14, marginTop: 5, flexWrap: 'wrap' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem', fontWeight: 600 }}>
-                    <Package size={13} /> {order.franchiseName}
-                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem', fontWeight: 600 }}><Package size={13} /> {order.franchiseName}</span>
                   {order.supplierName && <span style={{ fontSize: '0.82rem', color: 'var(--info)' }}>📦 {order.supplierName}</span>}
-                  <span style={{ fontSize: '0.8rem', color: 'var(--gray)' }}>
-                    {order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}
-                  </span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--gray)' }}>{order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}</span>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -416,8 +427,7 @@ export default function AdminOrders() {
                   style={{ background: 'var(--blush)', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--rose-dark)', fontWeight: 600, fontFamily: 'DM Sans' }}>
                   📂 Move
                 </button>
-                <button className="close-btn" onClick={(e) => handleDelete(order._id, e)}
-                  style={{ background: '#fde8e8', color: 'var(--danger)' }}>
+                <button className="close-btn" onClick={(e) => handleDelete(order._id, e)} style={{ background: '#fde8e8', color: 'var(--danger)' }}>
                   <Trash2 size={13} />
                 </button>
                 <ChevronRight size={18} color="var(--gray)" onClick={() => setSelected(order)} />
@@ -440,12 +450,11 @@ const filterBoxHeader = { display: 'flex', alignItems: 'center', justifyContent:
 const filterLabel = { fontWeight: 600, fontSize: '0.82rem', color: 'var(--gray)', textTransform: 'uppercase', letterSpacing: '0.5px' };
 const clearBtn = { fontSize: '0.8rem', color: 'var(--rose-dark)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 };
 const moveBtnStyle = (colour, isCurrent) => ({
-  padding: '12px 16px', borderRadius: 10,
+  padding: '10px 14px', borderRadius: 8,
   border: `1.5px solid ${isCurrent ? colour : 'var(--light-gray)'}`,
   background: isCurrent ? colour + '22' : 'var(--white)',
-  fontFamily: 'DM Sans', fontSize: '0.9rem',
+  fontFamily: 'DM Sans', fontSize: '0.88rem',
   cursor: isCurrent ? 'default' : 'pointer',
-  textAlign: 'left', display: 'flex', alignItems: 'center',
-  justifyContent: 'space-between', width: '100%',
-  opacity: isCurrent ? 0.8 : 1, transition: 'all 0.2s'
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  width: '100%', transition: 'all 0.2s'
 });
