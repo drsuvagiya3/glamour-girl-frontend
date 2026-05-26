@@ -62,7 +62,7 @@ export default function OrderSummary() {
           if (item.styleNumber !== oldStyle) return item;
           return { ...item, styleNumber: newStyle };
         });
-        await API.put(\`/orders/\${order._id}/status\`, {
+        await API.put(`/orders/${order._id}/status`, {
           status: order.status,
           items: updatedItems
         });
@@ -74,7 +74,7 @@ export default function OrderSummary() {
           item.styleNumber === oldStyle ? { ...item, styleNumber: newStyle } : item
         )
       })));
-      toast.success(\`Style \${oldStyle} renamed to \${newStyle}\${affectedOrders.length > 1 ? ' — merged across ' + affectedOrders.length + ' orders' : ''}!\`);
+      toast.success(`Style ${oldStyle} renamed to ${newStyle}${affectedOrders.length > 1 ? ' — merged across ' + affectedOrders.length + ' orders' : ''}!`);
       setEditingStyle(null);
     } catch {
       toast.error('Failed to update style number');
