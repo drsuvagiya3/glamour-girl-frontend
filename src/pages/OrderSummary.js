@@ -38,7 +38,6 @@ function EditStyleModal({ styleNumber, onSave, onClose }) {
 }
 
 export default function OrderSummary() {
-  const [editingStyle, setEditingStyle] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [shopFilter, setShopFilter] = useState('all');
