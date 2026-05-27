@@ -6,7 +6,7 @@ import API from '../utils/api';
 
 const LOCATIONS = [
   'Eastbourne(H3)', 'Croydon(H9)', 'Hastings(H6)', 'Portsmouth(H8)',
-  'Maidstone(H1)', 'Fareham(H4)', 'Boscomb(H5)', ];
+  'Maidstone(H1)', 'Fareham(H4)', 'Boscomb(H5)', 'Bristol' ];
 
 export default function Register() {
   const [form, setForm] = useState({
