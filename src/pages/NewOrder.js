@@ -7,7 +7,7 @@ import API from '../utils/api';
 const COLOURS = [
   'Black', 'White', 'Cream', 'Beige', 'Pink', 'Light Pink', 'Red',
   'Wine', 'Navy blue', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
-  'Camel', 'Brown', 'Grey', 'Light grey', 'Charcoal', 'Mocha', 'Baby Pink', 'Light Yellow',
+  'Camel', 'Brown', 'Grey', 'Light grey', 'Charcoal', 'Mocha', 'Leapord', 'Baby Pink', 'Light Yellow',
   'Gold', 'Silver', 'Multi-colour', 'Other'
 ];
 
