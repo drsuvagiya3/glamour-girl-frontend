@@ -6,9 +6,9 @@ import API from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 const COLOURS = [
-  'Black', 'White', 'Cream', 'Beige', 'Nude', 'Blush Pink', 'Hot Pink', 'Red',
-  'Burgundy', 'Navy', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
-  'Camel', 'Brown', 'Grey', 'Charcoal', 'Mocha', 'Baby Pink', 'Light Yellow',
+  'Black', 'White', 'Cream', 'Beige', 'Pink', 'Light Pink', 'Red',
+  'Wine', 'Navy blue', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
+  'Camel', 'Brown', 'Grey', 'Light grey', 'Charcoal', 'Mocha', 'Leapord', 'Baby Pink', 'Light Yellow',
   'Gold', 'Silver', 'Multi-colour', 'Other'
 ];
 
