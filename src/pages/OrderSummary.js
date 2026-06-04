@@ -48,6 +48,30 @@ export default function OrderSummary() {
   const [suppliers, setSuppliers] = useState([]);
   const [categories, setCategories] = useState([]);
   const [editingStyle, setEditingStyle] = useState(null);
+  const [bulkStatus, setBulkStatus] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const applyBulkStatus = async () => {
+    if (!bulkStatus) return toast.error('Select a status first');
+    if (categoryFilter === 'all') return toast.error('Select a category first');
+    const orderIds = [...new Set(filtered.map(o => o._id))];
+    if (orderIds.length === 0) return toast.error('No orders in this category');
+    setBulkLoading(true);
+    try {
+      await Promise.all(orderIds.map(id =>
+        API.put('/orders/' + id + '/status', { status: bulkStatus })
+      ));
+      setOrders(prev => prev.map(o =>
+        orderIds.includes(o._id) ? { ...o, status: bulkStatus } : o
+      ));
+      toast.success(orderIds.length + ' orders marked as ' + bulkStatus + '!');
+      setBulkStatus('');
+    } catch {
+      toast.error('Failed to update some orders');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
 
   // Save edited style number — merges if target already exists
   const saveStyleNumber = async (oldStyle, newStyle) => {
@@ -420,6 +444,34 @@ export default function OrderSummary() {
           </div>
         </div>
       </div>
+
+      {/* Bulk action bar — only when category is selected */}
+      {categoryFilter !== 'all' && filtered.length > 0 && (
+        <div style={{ background: 'var(--charcoal)', borderRadius: 'var(--radius)', padding: '14px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: 'white', fontWeight: 600, fontSize: '0.88rem' }}>
+            📦 {selectedCatName} — {[...new Set(filtered.map(o => o._id))].length} orders
+          </span>
+          <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', fontFamily: 'DM Sans', fontSize: '0.85rem', background: 'white', cursor: 'pointer', outline: 'none' }}>
+            <option value="">Bulk action...</option>
+            {['confirmed','processing','shipped','delivered','cancelled'].map(s => (
+              <option key={s} value={s}>Mark all as {s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </select>
+          <button onClick={applyBulkStatus} disabled={!bulkStatus || bulkLoading}
+            style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: bulkStatus ? 'var(--rose)' : 'rgba(255,255,255,0.2)', color: 'white', fontFamily: 'DM Sans', fontSize: '0.85rem', fontWeight: 600, cursor: bulkStatus ? 'pointer' : 'default' }}>
+            {bulkLoading ? 'Updating...' : 'Apply'}
+          </button>
+          {/* Status breakdown */}
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {['pending','confirmed','processing','shipped','delivered'].map(s => {
+              const count = filtered.filter(o => o.status === s).length;
+              if (!count) return null;
+              return <span key={s} className={'status-badge status-' + s} style={{ fontSize: '0.7rem' }}>{count} {s}</span>;
+            })}
+          </div>
+        </div>
+      )}
 
       {summary.length === 0 ? (
         <div className="empty-state">
