@@ -105,7 +105,9 @@ export default function OrderSummary() {
     if (statusFilter !== 'all' && o.status !== statusFilter) return false;
     if (categoryFilter !== 'all') {
       const orderCat = o.adminCategory || o.supplierName || '';
-      if (orderCat !== selectedCatName) return false;
+      // Match whole order category OR any individual item's itemCategory
+      const itemMatch = o.items?.some(item => item.itemCategory === selectedCatName);
+      if (orderCat !== selectedCatName && !itemMatch) return false;
     }
     return true;
   });
@@ -113,7 +115,13 @@ export default function OrderSummary() {
   // Build summary map
   const summaryMap = {};
   filtered.forEach(order => {
+    const orderCat = order.adminCategory || order.supplierName || '';
     order.items.forEach(item => {
+      // If filtering by category, only include items that belong to it
+      if (categoryFilter !== 'all') {
+        const itemBelongs = orderCat === selectedCatName || item.itemCategory === selectedCatName;
+        if (!itemBelongs) return;
+      }
       const key = item.styleNumber;
       if (!summaryMap[key]) {
         summaryMap[key] = {
