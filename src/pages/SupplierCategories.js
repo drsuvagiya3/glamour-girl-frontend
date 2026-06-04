@@ -290,13 +290,19 @@ export default function SupplierCategories() {
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--cream)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
-                      {/* Thumbnails */}
+                      {/* Thumbnails — only show items belonging to this category */}
                       <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={() => setSelectedOrder(order)}>
-                        {order.items.slice(0, 2).map((item, i) => (
-                          item.imageUrl
-                            ? <img key={i} src={item.imageUrl} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '2px solid var(--light-gray)' }} />
-                            : <div key={i} style={{ width: 48, height: 48, borderRadius: 8, background: 'var(--blush)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'var(--rose-dark)', fontWeight: 600 }}>{item.styleNumber}</div>
-                        ))}
+                        {(() => {
+                          const orderBelongs = (order.adminCategory || order.supplierName || '') === cat.name;
+                          const visibleItems = orderBelongs
+                            ? order.items.slice(0, 2)
+                            : order.items.filter(item => item.itemCategory === cat.name).slice(0, 2);
+                          return visibleItems.map((item, i) => (
+                            item.imageUrl
+                              ? <img key={i} src={item.imageUrl} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '2px solid var(--light-gray)' }} />
+                              : <div key={i} style={{ width: 48, height: 48, borderRadius: 8, background: 'var(--blush)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'var(--rose-dark)', fontWeight: 600 }}>{item.styleNumber}</div>
+                          ));
+                        })()}
                       </div>
 
                       <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelectedOrder(order)}>
@@ -308,7 +314,13 @@ export default function SupplierCategories() {
                           )}
                         </div>
                         <div style={{ fontSize: '0.82rem', color: 'var(--gray)', marginTop: 3 }}>
-                          {order.franchiseName} · {order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}
+                          {(() => {
+                            const orderBelongs = (order.adminCategory || order.supplierName || '') === cat.name;
+                            const count = orderBelongs
+                              ? order.items.length
+                              : order.items.filter(item => item.itemCategory === cat.name).length;
+                            return `${order.franchiseName} · ${count} item${count !== 1 ? 's' : ''} · ${formatDate(order.createdAt)}`;
+                          })()}
                         </div>
                         <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
                           {order.items.map((item, i) => {
