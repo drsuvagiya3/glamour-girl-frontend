@@ -57,10 +57,6 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
       });
       // Update local itemCategories state
       setItemCategories(prev => ({ ...prev, [itemIdx]: categoryName }));
-      // Also notify parent to update order in list
-      if (onStatusUpdate) {
-        await onStatusUpdate(order._id, order.status, order.adminNotes, updatedItems, order.grandTotal);
-      }
       toast.success(`Item moved to ${categoryName || 'Uncategorised'}!`);
       setMovingItemIdx(null);
     } catch (err) {
