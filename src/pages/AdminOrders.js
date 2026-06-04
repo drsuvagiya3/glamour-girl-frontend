@@ -148,10 +148,7 @@ export default function AdminOrders() {
     return a.localeCompare(b);
   });
 
-  const allCategoryNames = [
-    ...categories.map(c => c.name),
-    ...[...new Set(orders.map(o => o.supplierName).filter(Boolean))]
-  ].filter((v, i, a) => a.indexOf(v) === i);
+  const allCategoryNames = categories.map(c => c.name);
 
   const toggleGroup = (key) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
 
