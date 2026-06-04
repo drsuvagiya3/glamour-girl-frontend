@@ -16,8 +16,34 @@ export default function SupplierCategories() {
   const [movingOrder, setMovingOrder] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [bulkStatus, setBulkStatus] = useState({}); // catId -> selected status
+  const [bulkLoading, setBulkLoading] = useState({}); // catId -> bool
 
   useEffect(() => { fetchAll(); }, []);
+
+  // Bulk update all orders in a category
+  const bulkUpdateCategory = async (catName, newStatus) => {
+    const catOrders = getOrdersForCategory(catName);
+    if (catOrders.length === 0) return toast.error('No orders in this category');
+    const catId = catName;
+    setBulkLoading(prev => ({ ...prev, [catId]: true }));
+    try {
+      await Promise.all(catOrders.map(order =>
+        API.put(`/orders/${order._id}/status`, { status: newStatus })
+      ));
+      setOrders(prev => prev.map(o =>
+        catOrders.find(co => co._id === o._id)
+          ? { ...o, status: newStatus }
+          : o
+      ));
+      toast.success(`${catOrders.length} orders marked as ${newStatus}!`);
+      setBulkStatus(prev => ({ ...prev, [catId]: '' }));
+    } catch {
+      toast.error('Failed to update some orders');
+    } finally {
+      setBulkLoading(prev => ({ ...prev, [catId]: false }));
+    }
+  };
 
   const fetchAll = async () => {
     try {
@@ -276,6 +302,39 @@ export default function SupplierCategories() {
                   {isExpanded ? <ChevronDown size={16} color="var(--gray)" /> : <ChevronRight size={16} color="var(--gray)" />}
                 </div>
               </div>
+
+              {/* Bulk action bar — shown when expanded and has orders */}
+              {isExpanded && catOrders.length > 0 && (
+                <div style={{ padding: '12px 20px', background: cat.colour + '11', borderTop: `1px solid ${cat.colour}33`, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--gray)' }}>
+                    Bulk Action ({catOrders.length} orders):
+                  </span>
+                  <select
+                    value={bulkStatus[cat.name] || ''}
+                    onChange={e => setBulkStatus(prev => ({ ...prev, [cat.name]: e.target.value }))}
+                    onClick={e => e.stopPropagation()}
+                    style={{ padding: '7px 12px', borderRadius: 8, border: `1.5px solid ${cat.colour}`, fontFamily: 'DM Sans', fontSize: '0.85rem', outline: 'none', background: 'white', cursor: 'pointer' }}>
+                    <option value="">Select status...</option>
+                    {['confirmed','processing','shipped','delivered','cancelled'].map(s => (
+                      <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={e => { e.stopPropagation(); bulkStatus[cat.name] && bulkUpdateCategory(cat.name, bulkStatus[cat.name]); }}
+                    disabled={!bulkStatus[cat.name] || bulkLoading[cat.name]}
+                    style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: bulkStatus[cat.name] ? cat.colour : 'var(--light-gray)', color: bulkStatus[cat.name] ? 'white' : 'var(--gray)', fontFamily: 'DM Sans', fontSize: '0.85rem', fontWeight: 600, cursor: bulkStatus[cat.name] ? 'pointer' : 'default', transition: 'all 0.2s' }}>
+                    {bulkLoading[cat.name] ? 'Updating...' : `Apply to All`}
+                  </button>
+                  {/* Status summary */}
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                    {['pending','confirmed','processing','shipped','delivered'].map(s => {
+                      const count = catOrders.filter(o => o.status === s).length;
+                      if (!count) return null;
+                      return <span key={s} className={`status-badge status-${s}`} style={{ fontSize: '0.7rem' }}>{count} {s}</span>;
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Orders in this category */}
               {isExpanded && (
