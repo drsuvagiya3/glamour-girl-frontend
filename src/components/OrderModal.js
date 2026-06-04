@@ -69,11 +69,8 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
     }
   };
 
-  // All category options
-  const allCategories = [
-    ...categories.map(c => c.name),
-    ...[...new Set(order.items.map(i => i.itemCategory).filter(Boolean))]
-  ].filter((v, i, a) => a.indexOf(v) === i);
+  // Only show created categories
+  const allCategories = categories.map(c => c.name);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
