@@ -38,17 +38,33 @@ export default function OrderModal({ order, onClose, onStatusUpdate, onFranchise
   // Move individual item to a category
   const moveItemToCategory = async (itemIdx, categoryName) => {
     try {
-      const updatedItems = order.items.map((item, i) =>
-        i === itemIdx ? { ...item, itemCategory: categoryName } : item
-      );
-      await API.put(`/orders/${order._id}/status`, {
+      const updatedItems = order.items.map((item, i) => {
+        if (i !== itemIdx) return item;
+        return {
+          styleNumber: item.styleNumber,
+          description: item.description,
+          imageUrl: item.imageUrl,
+          colourSizes: item.colourSizes,
+          price: item.price,
+          retailPrice: item.retailPrice,
+          totalAmount: item.totalAmount,
+          itemCategory: categoryName,
+        };
+      });
+      const { data } = await API.put(`/orders/${order._id}/status`, {
         status: order.status,
         items: updatedItems
       });
+      // Update local itemCategories state
       setItemCategories(prev => ({ ...prev, [itemIdx]: categoryName }));
+      // Also notify parent to update order in list
+      if (onStatusUpdate) {
+        await onStatusUpdate(order._id, order.status, order.adminNotes, updatedItems, order.grandTotal);
+      }
       toast.success(`Item moved to ${categoryName || 'Uncategorised'}!`);
       setMovingItemIdx(null);
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error('Failed to move item');
     }
   };
