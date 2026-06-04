@@ -66,11 +66,18 @@ export default function SupplierCategories() {
     }
   };
 
-  // Group orders by adminCategory / supplierName
+  // Group orders by adminCategory OR orders that have items with itemCategory === catName
   const getOrdersForCategory = (catName) =>
-    orders.filter(o => (o.adminCategory || o.supplierName || '') === catName);
+    orders.filter(o =>
+      (o.adminCategory || o.supplierName || '') === catName ||
+      o.items.some(item => item.itemCategory === catName)
+    );
 
-  const uncategorisedOrders = orders.filter(o => !o.adminCategory && !o.supplierName);
+  // Uncategorised = no adminCategory, no supplierName, and no items with itemCategory
+  const uncategorisedOrders = orders.filter(o =>
+    !o.adminCategory && !o.supplierName &&
+    !o.items.some(item => item.itemCategory)
+  );
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return toast.error('Category name required');
@@ -304,12 +311,31 @@ export default function SupplierCategories() {
                           {order.franchiseName} · {order.items.length} item{order.items.length !== 1 ? 's' : ''} · {formatDate(order.createdAt)}
                         </div>
                         <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
-                          {order.items.map((item, i) => (
-                            <span key={i} style={{ background: cat.colour + '22', color: cat.colour, padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600 }}>
-                              {item.styleNumber}
-                            </span>
-                          ))}
+                          {order.items.map((item, i) => {
+                            // Check if this item belongs to this category
+                            const itemBelongs = item.itemCategory === cat.name;
+                            const orderBelongs = (order.adminCategory || order.supplierName || '') === cat.name;
+                            // Show all items if whole order belongs, or only matching items
+                            if (!orderBelongs && !itemBelongs) return null;
+                            return (
+                              <span key={i} style={{
+                                background: itemBelongs && !orderBelongs ? cat.colour + '44' : cat.colour + '22',
+                                color: cat.colour,
+                                padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
+                                border: itemBelongs && !orderBelongs ? `1px solid ${cat.colour}` : 'none'
+                              }}>
+                                {item.styleNumber}
+                                {itemBelongs && !orderBelongs && <span style={{ marginLeft: 3, fontSize: '0.6rem' }}>★</span>}
+                              </span>
+                            );
+                          })}
                         </div>
+                        {/* Show note if only some items belong here */}
+                        {order.items.some(item => item.itemCategory === cat.name) && (order.adminCategory || order.supplierName || '') !== cat.name && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--gray)', marginTop: 2, fontStyle: 'italic' }}>
+                            ★ individual items moved to this category
+                          </div>
+                        )}
                       </div>
 
                       <button onClick={() => setMovingOrder(order)}
