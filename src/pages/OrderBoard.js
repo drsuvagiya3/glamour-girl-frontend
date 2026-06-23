@@ -6,9 +6,9 @@ import API from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 const COLOURS = [
-  'Black', 'White', 'Cream', 'Beige', 'Pink', 'Light Pink', 'Red',
-  'Wine', 'Navy blue', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
-  'Camel', 'Brown', 'Grey', 'Light grey', 'Charcoal', 'Mocha', 'Leapord', 'Baby Pink', 'Light Yellow',
+  'Black', 'White', 'Cream', 'Beige', 'Nude', 'Blush Pink', 'Hot Pink', 'Red',
+  'Burgundy', 'Navy', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
+  'Camel', 'Brown', 'Grey', 'Charcoal', 'Mocha', 'Baby Pink', 'Light Yellow',
   'Gold', 'Silver', 'Multi-colour', 'Other'
 ];
 
@@ -23,7 +23,7 @@ export default function OrderBoard() {
 
 
   useEffect(() => {
-    API.get('/orders/public/board')
+    API.get('/orders/public/board?limit=99999')
       .then(({ data }) => setOrders(data))
       .catch(() => toast.error('Failed to load order board'))
       .finally(() => setLoading(false));
@@ -31,6 +31,12 @@ export default function OrderBoard() {
 
   const suppliers = [...new Set(orders.map(o => o.supplierName).filter(Boolean))];
   const filtered = supplierFilter === 'all' ? orders : orders.filter(o => o.supplierName === supplierFilter);
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginatedFiltered = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset to page 1 when filter changes
+  const handleSupplierFilter = (val) => { setSupplierFilter(val); setPage(1); };
+
   const formatDate = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
   // Open copy modal — pre-fill items with qty 0
@@ -110,12 +116,12 @@ export default function OrderBoard() {
 
       {/* Supplier filter */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 24 }}>
-        <button className={`filter-btn ${supplierFilter === 'all' ? 'active' : ''}`} onClick={() => setSupplierFilter('all')}>
+        <button className={`filter-btn ${supplierFilter === 'all' ? 'active' : ''}`} onClick={() => handleSupplierFilter('all')}>
           All Suppliers
         </button>
         {suppliers.map(s => (
           <button key={s} className={`filter-btn ${supplierFilter === s ? 'active' : ''}`}
-            onClick={() => setSupplierFilter(s)}>
+            onClick={() => handleSupplierFilter(s)}>
             📦 {s}
           </button>
         ))}
@@ -128,7 +134,7 @@ export default function OrderBoard() {
         </div>
       ) : (
         <div className="card-grid">
-          {filtered.map(order => {
+          {paginatedFiltered.map(order => {
             const isOwn = order.franchiseName === (user?.franchiseName || user?.name);
             const isExpanded = expanded === order._id;
             return (
@@ -235,6 +241,33 @@ export default function OrderBoard() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 24, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1.5px solid var(--light-gray)', background: page === 1 ? 'var(--light-gray)' : 'var(--white)', cursor: page === 1 ? 'default' : 'pointer', fontFamily: 'DM Sans', fontSize: '0.85rem', color: page === 1 ? 'var(--gray)' : 'var(--charcoal)' }}>
+            ← Prev
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+            <button key={p} onClick={() => setPage(p)}
+              style={{ padding: '8px 14px', borderRadius: 8, border: '1.5px solid', borderColor: p === page ? 'var(--rose-dark)' : 'var(--light-gray)', background: p === page ? 'var(--rose-dark)' : 'var(--white)', color: p === page ? 'white' : 'var(--charcoal)', cursor: 'pointer', fontFamily: 'DM Sans', fontSize: '0.85rem', fontWeight: p === page ? 700 : 400 }}>
+              {p}
+            </button>
+          ))}
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1.5px solid var(--light-gray)', background: page === totalPages ? 'var(--light-gray)' : 'var(--white)', cursor: page === totalPages ? 'default' : 'pointer', fontFamily: 'DM Sans', fontSize: '0.85rem', color: page === totalPages ? 'var(--gray)' : 'var(--charcoal)' }}>
+            Next →
+          </button>
+          <span style={{ fontSize: '0.82rem', color: 'var(--gray)', marginLeft: 8 }}>
+            Page {page} of {totalPages} · {filtered.length} total orders
+          </span>
         </div>
       )}
 
