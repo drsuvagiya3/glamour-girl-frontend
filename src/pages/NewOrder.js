@@ -7,15 +7,11 @@ import API from '../utils/api';
 const COLOURS = [
   'Black', 'White', 'Cream', 'Beige', 'Pink', 'Light Pink', 'Red',
   'Wine', 'Navy blue', 'Royal Blue', 'Sky Blue', 'Mint Green', 'Olive', 'Khaki',
-  'Camel', 'Brown', 'Grey', 'Light grey', 'Charcoal', 'Mocha', 'Leapord', 'Baby Pink', 'Light Yellow',
+  'Camel', 'Brown', 'Grey', 'Light grey','Charcoal', 'Mocha', 'Baby Pink', 'Light Yellow',
   'Gold', 'Silver', 'Multi-colour', 'Other'
 ];
 
-const SUPPLIERS = [
-  'Joliko', 'L8', 'LEA MODE', 'New Collection',
-  'cherry-coco', 'Portebello', 'Venessa', 'mochhi',
-  'Tendense', 'Fashion', 'Other'
-];
+const SUPPLIERS = ['Joliko', 'L8', 'LEA MODE', 'New Collection', 'cherry-coco', 'Portebello', 'Venessa', 'mochhi','Tendense','Fashion','Other'];
 
 const blankColourRow = () => ({ colour: '', quantity: 0 });
 const blankItem = () => ({
@@ -30,9 +26,34 @@ function StyleNumberInput({ value, onChange, onSelect }) {
   const [allStyles, setAllStyles] = useState([]);
   const wrapRef = useRef(null);
 
-  // Load all saved styles once
+  // Load styles from StyleNumbers collection + all orders (so processed orders still show)
   useEffect(() => {
-    API.get('/styles').then(({ data }) => setAllStyles(data)).catch(() => {});
+    Promise.allSettled([
+      API.get('/styles'),
+      API.get('/orders')
+    ]).then(([stylesRes, ordersRes]) => {
+      const fromStyles = stylesRes.status === 'fulfilled' ? stylesRes.value.data : [];
+      const fromOrders = ordersRes.status === 'fulfilled'
+        ? ordersRes.value.data.flatMap(order =>
+            order.items.map(item => ({
+              _id: item.styleNumber,
+              styleNumber: item.styleNumber,
+              description: item.description || '',
+              imageUrl: item.imageUrl || '',
+            }))
+          )
+        : [];
+      // Merge both sources, deduplicate by styleNumber, prefer entries with images
+      const merged = {};
+      [...fromOrders, ...fromStyles].forEach(s => {
+        if (!s.styleNumber) return;
+        const key = s.styleNumber.toLowerCase();
+        if (!merged[key] || (!merged[key].imageUrl && s.imageUrl)) {
+          merged[key] = s;
+        }
+      });
+      setAllStyles(Object.values(merged).sort((a, b) => a.styleNumber.localeCompare(b.styleNumber)));
+    });
   }, []);
 
   // Filter locally as user types
@@ -57,11 +78,6 @@ function StyleNumberInput({ value, onChange, onSelect }) {
     setShowDrop(false);
   };
 
-  // Check if typed value exactly matches an existing style
-  const exactMatch = value.trim()
-    ? allStyles.find(s => s.styleNumber.toLowerCase() === value.toLowerCase())
-    : null;
-
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input
@@ -71,26 +87,7 @@ function StyleNumberInput({ value, onChange, onSelect }) {
         onChange={e => { onChange(e.target.value); setShowDrop(true); }}
         onFocus={() => setShowDrop(true)}
         required
-        style={{ borderColor: exactMatch ? 'var(--warning)' : undefined }}
       />
-      {/* Warning banner when exact match found */}
-      {exactMatch && (
-        <div style={{
-          marginTop: 6, padding: '10px 12px', background: '#FDF0E8',
-          borderRadius: 8, border: '1.5px solid var(--warning)',
-          fontSize: '0.82rem', color: '#8B5E00'
-        }}>
-          ⚠️ Style <strong>{exactMatch.styleNumber}</strong> already exists.
-          <div style={{ marginTop: 4 }}>
-            Use the same style number to keep all orders linked together.{' '}
-            <button type="button"
-              onClick={() => handleSelect(exactMatch)}
-              style={{ background: 'none', border: 'none', color: 'var(--rose-dark)', fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans', fontSize: '0.82rem', padding: 0, textDecoration: 'underline' }}>
-              Click here to use existing style
-            </button>
-          </div>
-        </div>
-      )}
       {showDrop && suggestions.length > 0 && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
@@ -98,7 +95,7 @@ function StyleNumberInput({ value, onChange, onSelect }) {
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
           maxHeight: 220, overflowY: 'auto', marginTop: 4
         }}>
-          {value.trim() && !exactMatch && (
+          {value.trim() && !allStyles.find(s => s.styleNumber.toLowerCase() === value.toLowerCase()) && (
             <div style={dropNewItem} onClick={() => { onChange(value); setShowDrop(false); }}>
               <span style={{ color: 'var(--rose-dark)', fontWeight: 600 }}>+ Use "{value}"</span>
               <span style={{ fontSize: '0.75rem', color: 'var(--gray)' }}>New style number</span>
@@ -132,25 +129,9 @@ const dropItem = { padding: '10px 14px', cursor: 'pointer', transition: 'backgro
 const dropNewItem = { padding: '10px 14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2, borderBottom: '1px solid var(--light-gray)', background: 'var(--cream)' };
 
 export default function NewOrder() {
-  // Check if coming from Order Board copy
-  const getCopiedOrder = () => {
-    try {
-      const copied = sessionStorage.getItem('gg_copy_order');
-      if (copied) { sessionStorage.removeItem('gg_copy_order'); return JSON.parse(copied); }
-    } catch {}
-    return null;
-  };
-  const copied = getCopiedOrder();
-
-  const getInitialSupplier = () => {
-    if (!copied?.supplierName) return '';
-    if (SUPPLIERS.includes(copied.supplierName)) return copied.supplierName;
-    return 'Other';
-  };
-  const [supplierName, setSupplierName] = useState(getInitialSupplier());
-  
-  const [customSupplier, setCustomSupplier] = useState(!SUPPLIERS.includes(copied?.supplierName || '') ? (copied?.supplierName || '') : '');
-  const [items, setItems] = useState(copied?.items?.length ? copied.items : [blankItem()]);
+  const [supplierName, setSupplierName] = useState('');
+  const [customSupplier, setCustomSupplier] = useState('');
+  const [items, setItems] = useState([blankItem()]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState({});
@@ -265,12 +246,6 @@ export default function NewOrder() {
       <div className="page-header">
         <div><h2>New Order</h2><p>Fill in supplier and item details</p></div>
       </div>
-
-      {copied && (
-        <div style={{ background: 'var(--blush)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, borderLeft: '3px solid var(--rose-dark)', fontSize: '0.88rem', color: 'var(--rose-dark)', fontWeight: 500 }}>
-          📋 Items copied from another order — supplier and styles are pre-filled. Set your quantities and place your order.
-        </div>
-      )}
 
       <form onSubmit={handleSubmit}>
         {/* Supplier */}
